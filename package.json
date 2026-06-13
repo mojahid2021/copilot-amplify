@@ -1,6 +1,6 @@
 {
   "name": "copilot-amplify",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
@@ -36,29 +36,111 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "Copilot Amplify",
+      "type": "object",
+      "properties": {
+        "copilot-amplify.xiaomi.apiKey": {
+          "type": "string",
+          "description": "Xiaomi MiMo API Key",
+          "secret": true
+        },
+        "copilot-amplify.glm.apiKey": {
+          "type": "string",
+          "description": "Z.ai GLM API Key",
+          "secret": true
+        },
+        "copilot-amplify.groq.apiKey": {
+          "type": "string",
+          "description": "Groq API Key",
+          "secret": true
+        },
+        "copilot-amplify.nvidia.apiKey": {
+          "type": "string",
+          "description": "NVIDIA NIM API Key",
+          "secret": true
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilot-amplify-view-container",
+          "title": "Copilot Amplify",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "copilot-amplify-view-container": [
+        {
+          "id": "copilot-amplify.providers",
+          "name": "Providers",
+          "type": "tree"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "copilot-amplify.refresh",
+          "when": "view == copilot-amplify.providers",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "copilot-amplify.setApiKey",
+          "when": "view == copilot-amplify.providers",
+          "group": "inline"
+        },
+        {
+          "command": "copilot-amplify.testConnection",
+          "when": "view == copilot-amplify.providers",
+          "group": "inline"
+        },
+        {
+          "command": "copilot-amplify.clearApiKey",
+          "when": "view == copilot-amplify.providers",
+          "group": "inline"
+        }
+      ]
+    },
     "languageModelChatProviders": [
       {
         "vendor": "LuneCode.xiaomi",
-        "displayName": "Xiaomi",
-        "managementCommand": "copilot-amplify.xiaomi.manage"
+        "displayName": "Xiaomi"
       },
       {
         "vendor": "LuneCode.glm",
-        "displayName": "Z.ai",
-        "managementCommand": "copilot-amplify.glm.manage"
+        "displayName": "Z.ai"
       },
       {
         "vendor": "LuneCode.groq",
-        "displayName": "Groq",
-        "managementCommand": "copilot-amplify.groq.manage"
+        "displayName": "Groq"
       },
       {
         "vendor": "LuneCode.nvidia",
-        "displayName": "NVIDIA NIM",
-        "managementCommand": "copilot-amplify.nvidia.manage"
+        "displayName": "NVIDIA NIM"
       }
     ],
     "commands": [
+      {
+        "command": "copilot-amplify.refresh",
+        "title": "Refresh"
+      },
+      {
+        "command": "copilot-amplify.setApiKey",
+        "title": "Set API Key"
+      },
+      {
+        "command": "copilot-amplify.testConnection",
+        "title": "Test Connection"
+      },
+      {
+        "command": "copilot-amplify.clearApiKey",
+        "title": "Clear API Key"
+      },
       {
         "command": "copilot-amplify.xiaomi.manage",
         "title": "Copilot Amplify: Xiaomi - Manage"

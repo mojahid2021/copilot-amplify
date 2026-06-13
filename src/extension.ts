@@ -13,6 +13,7 @@ import { GroqApiClient } from './groqApi';
 import { NvidiaNimApiClient } from './nvidiaApi';
 import { GenericApiClient } from './baseApi';
 import type { BaseAuthManager } from './baseAuth';
+import { ProvidersTreeDataProvider, ProviderTreeItem } from './treeProvider';
 
 const PROVIDER_VENDORS = {
   xiaomi: 'LuneCode.xiaomi',
@@ -84,39 +85,96 @@ function registerProviderSafely(
   }
 }
 
+function getAuthManager(
+  providerId: string,
+  xiaomiAuth: AuthManager,
+  glmAuth: GlmAuthManager,
+  groqAuth: GroqAuthManager,
+  nvidiaAuth: NvidiaAuthManager,
+): BaseAuthManager | null {
+  switch (providerId) {
+    case 'xiaomi': return xiaomiAuth;
+    case 'glm': return glmAuth;
+    case 'groq': return groqAuth;
+    case 'nvidia': return nvidiaAuth;
+    default: return null;
+  }
+}
+
+function getProviderDisplayName(providerId: string): string {
+  switch (providerId) {
+    case 'xiaomi': return 'Xiaomi MiMo';
+    case 'glm': return 'Z.ai GLM';
+    case 'groq': return 'Groq';
+    case 'nvidia': return 'NVIDIA NIM';
+    default: return providerId.charAt(0).toUpperCase() + providerId.slice(1);
+  }
+}
+
+function getTestInfo(providerId: string): { modelId: string; clientFactory: (key: string) => GenericApiClient } {
+  switch (providerId) {
+    case 'xiaomi': return { modelId: 'mimo-v2-flash', clientFactory: (key) => new MiMoApiClient(key) };
+    case 'glm': return { modelId: 'glm-4.7-flash', clientFactory: (key) => new GlmApiClient(key) };
+    case 'groq': return { modelId: 'llama-3.3-70b-versatile', clientFactory: (key) => new GroqApiClient(key) };
+    case 'nvidia': return { modelId: 'google/gemma-4-31b-it', clientFactory: (key) => new NvidiaNimApiClient(key) };
+    default: return { modelId: 'mimo-v2-flash', clientFactory: (key) => new MiMoApiClient(key) };
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const xiaomiAuthManager = new AuthManager(context.secrets);
   const glmAuthManager = new GlmAuthManager(context.secrets);
   const groqAuthManager = new GroqAuthManager(context.secrets);
   const nvidiaAuthManager = new NvidiaAuthManager(context.secrets);
 
+  // Create tree data provider
+  const treeDataProvider = new ProvidersTreeDataProvider(
+    xiaomiAuthManager,
+    glmAuthManager,
+    groqAuthManager,
+    nvidiaAuthManager,
+  );
+
+  // Register tree view
+  const treeView = vscode.window.createTreeView('copilot-amplify.providers', {
+    treeDataProvider,
+    showCollapseAll: true,
+  });
+  context.subscriptions.push(treeView);
+
   const providers: ProviderConfig[] = [
     {
       id: 'xiaomi',
-      displayName: 'Xiaomi',
+      displayName: 'Xiaomi MiMo',
       vendor: PROVIDER_VENDORS.xiaomi,
       authManager: xiaomiAuthManager,
       provider: new MiMoChatProvider(xiaomiAuthManager),
       testModelId: 'mimo-v2-flash',
       testClientFactory: (key) => new MiMoApiClient(key),
       manageActions: {
-        'Set API Key': () => xiaomiAuthManager.promptForApiKey().then(() => { }),
-        'Clear API Key': () => xiaomiAuthManager.deleteApiKey().then(() => { vscode.window.showInformationMessage('Xiaomi API key cleared'); }),
-        'Test Connection': () => testConnection(xiaomiAuthManager, (key) => new MiMoApiClient(key), 'mimo-v2-flash', 'Xiaomi'),
+        'Set API Key': () => xiaomiAuthManager.promptForApiKey().then(() => treeDataProvider.refresh()),
+        'Clear API Key': () => xiaomiAuthManager.deleteApiKey().then(() => {
+          vscode.window.showInformationMessage('Xiaomi MiMo API key cleared');
+          treeDataProvider.refresh();
+        }),
+        'Test Connection': () => testConnection(xiaomiAuthManager, (key) => new MiMoApiClient(key), 'mimo-v2-flash', 'Xiaomi MiMo'),
       },
     },
     {
       id: 'glm',
-      displayName: 'Z.ai',
+      displayName: 'Z.ai GLM',
       vendor: PROVIDER_VENDORS.glm,
       authManager: glmAuthManager,
       provider: new GlmChatProvider(glmAuthManager),
       testModelId: 'glm-4.7-flash',
       testClientFactory: (key) => new GlmApiClient(key),
       manageActions: {
-        'Set API Key': () => glmAuthManager.promptForApiKey().then(() => { }),
-        'Clear API Key': () => glmAuthManager.deleteApiKey().then(() => { vscode.window.showInformationMessage('Z.ai API key cleared'); }),
-        'Test Connection': () => testConnection(glmAuthManager, (key) => new GlmApiClient(key), 'glm-4.7-flash', 'Z.ai'),
+        'Set API Key': () => glmAuthManager.promptForApiKey().then(() => treeDataProvider.refresh()),
+        'Clear API Key': () => glmAuthManager.deleteApiKey().then(() => {
+          vscode.window.showInformationMessage('Z.ai GLM API key cleared');
+          treeDataProvider.refresh();
+        }),
+        'Test Connection': () => testConnection(glmAuthManager, (key) => new GlmApiClient(key), 'glm-4.7-flash', 'Z.ai GLM'),
       },
     },
     {
@@ -128,8 +186,11 @@ export function activate(context: vscode.ExtensionContext): void {
       testModelId: 'llama-3.3-70b-versatile',
       testClientFactory: (key) => new GroqApiClient(key),
       manageActions: {
-        'Set API Key': () => groqAuthManager.promptForApiKey().then(() => { }),
-        'Clear API Key': () => groqAuthManager.deleteApiKey().then(() => { vscode.window.showInformationMessage('Groq API key cleared'); }),
+        'Set API Key': () => groqAuthManager.promptForApiKey().then(() => treeDataProvider.refresh()),
+        'Clear API Key': () => groqAuthManager.deleteApiKey().then(() => {
+          vscode.window.showInformationMessage('Groq API key cleared');
+          treeDataProvider.refresh();
+        }),
         'Test Connection': () => testConnection(groqAuthManager, (key) => new GroqApiClient(key), 'llama-3.3-70b-versatile', 'Groq'),
       },
     },
@@ -142,8 +203,11 @@ export function activate(context: vscode.ExtensionContext): void {
       testModelId: 'google/gemma-4-31b-it',
       testClientFactory: (key) => new NvidiaNimApiClient(key),
       manageActions: {
-        'Set API Key': () => nvidiaAuthManager.promptForApiKey().then(() => { }),
-        'Clear API Key': () => nvidiaAuthManager.deleteApiKey().then(() => { vscode.window.showInformationMessage('NVIDIA NIM API key cleared'); }),
+        'Set API Key': () => nvidiaAuthManager.promptForApiKey().then(() => treeDataProvider.refresh()),
+        'Clear API Key': () => nvidiaAuthManager.deleteApiKey().then(() => {
+          vscode.window.showInformationMessage('NVIDIA NIM API key cleared');
+          treeDataProvider.refresh();
+        }),
         'Test Connection': () => testConnection(nvidiaAuthManager, (key) => new NvidiaNimApiClient(key), 'google/gemma-4-31b-it', 'NVIDIA NIM'),
       },
     },
@@ -151,13 +215,60 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const commands: vscode.Disposable[] = [];
 
+  // Register tree view commands
+  commands.push(
+    vscode.commands.registerCommand('copilot-amplify.refresh', () => {
+      treeDataProvider.refresh();
+    }),
+  );
+
+  commands.push(
+    vscode.commands.registerCommand('copilot-amplify.setApiKey', async (item: ProviderTreeItem) => {
+      if (item && item.providerId) {
+        const auth = getAuthManager(item.providerId, xiaomiAuthManager, glmAuthManager, groqAuthManager, nvidiaAuthManager);
+        if (auth) {
+          await auth.promptForApiKey();
+          treeDataProvider.refresh();
+        }
+      }
+    }),
+  );
+
+  commands.push(
+    vscode.commands.registerCommand('copilot-amplify.testConnection', async (item: ProviderTreeItem) => {
+      if (item && item.providerId) {
+        const auth = getAuthManager(item.providerId, xiaomiAuthManager, glmAuthManager, groqAuthManager, nvidiaAuthManager);
+        if (auth) {
+          const { modelId, clientFactory } = getTestInfo(item.providerId);
+          const displayName = getProviderDisplayName(item.providerId);
+          await testConnection(auth, clientFactory, modelId, displayName);
+        }
+      }
+    }),
+  );
+
+  commands.push(
+    vscode.commands.registerCommand('copilot-amplify.clearApiKey', async (item: ProviderTreeItem) => {
+      if (item && item.providerId) {
+        const auth = getAuthManager(item.providerId, xiaomiAuthManager, glmAuthManager, groqAuthManager, nvidiaAuthManager);
+        if (auth) {
+          await auth.deleteApiKey();
+          const displayName = getProviderDisplayName(item.providerId);
+          vscode.window.showInformationMessage(`${displayName} API key cleared`);
+          treeDataProvider.refresh();
+        }
+      }
+    }),
+  );
+
+  // Register all provider manage commands
   for (const config of providers) {
     registerProviderSafely(context, config.vendor, config.displayName, config.provider);
 
     commands.push(
       vscode.commands.registerCommand(`copilot-amplify.${config.id}.manage`, async () => {
         const choice = await vscode.window.showQuickPick(Object.keys(config.manageActions), {
-          placeHolder: `Manage ${config.displayName} provider`,
+          placeHolder: `Manage ${config.displayName}`,
         });
         if (choice) { await config.manageActions[choice](); }
       }),
