@@ -65,6 +65,7 @@
 | **Nemotron 3 Super 120B** (`nvidia/nemotron-3-super-120b-a12b`) | 1,048,576 | 16,384 | No | Yes |
 | **DeepSeek V4 Flash** (`deepseek-ai/deepseek-v4-flash`) | 1,048,576 | 16,384 | No | Yes |
 | **MiniMax M2.7** (`minimaxai/minimax-m2.7`) | 204,800 | 16,384 | No | Yes |
+| **MiniMax M3** (`minimaxai/minimax-m3`) | 1,048,576 | 16,384 | Yes | Yes |
 | **MiniMax M2.5** (`minimaxai/minimax-m2.5`) | 204,800 | 16,384 | No | Yes |
 | **Step 3.5 Flash** (`stepfun-ai/step-3.5-flash`) | 262,144 | 16,384 | No | Yes |
 | **GLM-5.1** (`z-ai/glm-5.1`) | 131,072 | 16,384 | No | Yes |
@@ -100,16 +101,6 @@
 - **Local Processing**: The extension acts as a bridge between VS Code and the provider APIs.
 - **No Mid-man**: Your requests go directly to the provider endpoints.
 - **Encrypted Keys**: API keys are stored in the OS-level keychain via VS Code.
-
----
-
-<p align="center">
-  <strong>💖 Support the Development</strong><br><br>
-  If you find this extension useful, consider buying me a coffee!<br><br>
-  <a href="https://www.paypal.com/donate?hosted_button_id=MZQS5CZ68NGEW">
-    <img src="https://www.paypalobjects.com/en_US/i/btn/btn_donateCC_LG.gif" alt="Donate with PayPal" />
-  </a>
-</p>
 
 ---
 

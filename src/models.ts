@@ -195,6 +195,17 @@ export const NIM_MODELS = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
+    id: 'minimaxai/minimax-m3',
+    name: 'MiniMax M3',
+    family: 'nvidia-nim',
+    version: 'minimax-m3',
+    tooltip: 'NVIDIA NIM',
+    detail: 'NVIDIA',
+    maxInputTokens: 1048576,
+    maxOutputTokens: 16384,
+    capabilities: { imageInput: true, toolCalling: true },
+  },
+  {
     id: 'minimax-m2.5',
     name: 'MiniMax M2.5',
     family: 'nvidia-nim',

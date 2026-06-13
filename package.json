@@ -1,6 +1,6 @@
 {
   "name": "copilot-amplify",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
