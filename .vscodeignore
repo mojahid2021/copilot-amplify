@@ -1,0 +1,17 @@
+.vscode/**
+.vscode-test/**
+.git/**
+.gitignore
+.vscodeignore
+src/**
+test/**
+tsconfig.json
+tsconfig.tsbuildinfo
+eslint.config.js
+eslint.ignores.js
+**/*.map
+**/*.ts
+*.vsix
+npm-debug.log
+yarn-error.log
+package-lock.json

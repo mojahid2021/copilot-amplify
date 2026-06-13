@@ -1,0 +1,106 @@
+{
+  "name": "copilot-amplify",
+  "version": "1.0.0",
+  "displayName": "Copilot Amplify",
+  "description": "Extend GitHub Copilot Chat with additional AI model providers",
+  "author": "Md Mojahid",
+  "publisher": "LuneCode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mojahid2021/copilot-amplify"
+  },
+  "license": "ISC",
+  "keywords": [
+    "xiaomi",
+    "mimo",
+    "glm",
+    "zai",
+    "nvidia",
+    "nim",
+    "ai",
+    "chat",
+    "copilot",
+    "language-model",
+    "provider"
+  ],
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.108.1"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "LuneCode.xiaomi",
+        "displayName": "Xiaomi",
+        "managementCommand": "copilot-amplify.xiaomi.manage"
+      },
+      {
+        "vendor": "LuneCode.glm",
+        "displayName": "Z.ai",
+        "managementCommand": "copilot-amplify.glm.manage"
+      },
+      {
+        "vendor": "LuneCode.groq",
+        "displayName": "Groq",
+        "managementCommand": "copilot-amplify.groq.manage"
+      },
+      {
+        "vendor": "LuneCode.nvidia",
+        "displayName": "NVIDIA NIM",
+        "managementCommand": "copilot-amplify.nvidia.manage"
+      }
+    ],
+    "commands": [
+      {
+        "command": "copilot-amplify.xiaomi.manage",
+        "title": "Copilot Amplify: Xiaomi - Manage"
+      },
+      {
+        "command": "copilot-amplify.glm.manage",
+        "title": "Copilot Amplify: Z.ai - Manage"
+      },
+      {
+        "command": "copilot-amplify.groq.manage",
+        "title": "Copilot Amplify: Groq - Manage"
+      },
+      {
+        "command": "copilot-amplify.nvidia.manage",
+        "title": "Copilot Amplify: NVIDIA NIM - Manage"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "clean": "node -e \"require('fs').rmSync('out', { recursive: true, force: true }); require('fs').rmSync('tsconfig.tsbuildinfo', { force: true })\"",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.5.2",
+    "@types/vscode": "1.108.1",
+    "@vscode/vsce": "^3.7.1",
+    "eslint": "10.2.0",
+    "eslint-plugin-n": "^17.24.0",
+    "globals": "^17.4.0",
+    "typescript": "^6.0.2",
+    "typescript-eslint": "^8.58.0"
+  },
+  "dependencies": {
+    "openai": "^6.33.0",
+    "secure-json-parse": "^4.1.0",
+    "ts-pattern": "^5.9.0"
+  }
+}
