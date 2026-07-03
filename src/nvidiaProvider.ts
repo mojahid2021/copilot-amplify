@@ -9,7 +9,7 @@ const NIM_MODEL_ID_MAP: Record<string, string> = {
   'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
   'deepseek-v4-pro': 'deepseek-ai/deepseek-v4-pro',
   'minimax-m2.7': 'minimaxai/minimax-m2.7',
-  'minimaxai/minimax-m3': 'minimaxai/minimax-m3',
+  'minimax-m3': 'minimaxai/minimax-m3',
   'minimax-m2.5': 'minimaxai/minimax-m2.5',
   'step-3.5-flash': 'stepfun-ai/step-3.5-flash',
   'step-3.7-flash': 'stepfun-ai/step-3.7-flash',
@@ -28,7 +28,6 @@ const NIM_MODEL_ID_MAP: Record<string, string> = {
 
 export class NvidiaChatProvider extends BaseChatProvider {
   protected override readonly baseURL = BASE_URL;
-  protected override readonly providerID = 'nvidia';
   protected override readonly providerDisplayName = 'NVIDIA NIM';
   protected override readonly models = NIM_MODELS;
 

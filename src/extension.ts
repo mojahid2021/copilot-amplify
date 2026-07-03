@@ -6,7 +6,7 @@ import { GroqAuthManager } from './groqAuth';
 import { GroqChatProvider } from './groqProvider';
 import { NvidiaAuthManager } from './nvidiaAuth';
 import { NvidiaChatProvider } from './nvidiaProvider';
-import { MiMoChatProvider } from './provider';
+import { fetchXiaomiChatModels, MiMoChatProvider } from './provider';
 import { MiMoApiClient } from './api';
 import { GlmApiClient } from './glmApi';
 import { GroqApiClient } from './groqApi';
@@ -33,10 +33,12 @@ interface ProviderConfig {
   manageActions: Record<string, () => Promise<void>>;
 }
 
+type TestModelResolver = string | ((key: string) => Promise<string>);
+
 async function testConnection(
   authManager: BaseAuthManager,
   clientFactory: (key: string) => GenericApiClient,
-  modelId: string,
+  modelId: TestModelResolver,
   providerDisplayName: string,
 ): Promise<void> {
   const key = await authManager.getApiKey();
@@ -53,7 +55,8 @@ async function testConnection(
 
   const client = clientFactory(key);
   try {
-    await client.chat(modelId, [{ role: 'user', content: 'Ping' }], {
+    const testModelId = typeof modelId === 'function' ? await modelId(key) : modelId;
+    await client.chat(testModelId, [{ role: 'user', content: 'Ping' }], {
       maxTokens: 1,
     });
     vscode.window.showInformationMessage(`${providerDisplayName} provider test succeeded.`);
@@ -101,6 +104,14 @@ function getAuthManager(
   }
 }
 
+async function getLatestXiaomiChatModel(apiKey: string): Promise<string> {
+  const [model] = await fetchXiaomiChatModels(apiKey);
+  if (!model) {
+    throw new Error('Xiaomi did not return any chat-capable MiMo models');
+  }
+  return model.id;
+}
+
 function getProviderDisplayName(providerId: string): string {
   switch (providerId) {
     case 'xiaomi': return 'Xiaomi MiMo';
@@ -111,13 +122,13 @@ function getProviderDisplayName(providerId: string): string {
   }
 }
 
-function getTestInfo(providerId: string): { modelId: string; clientFactory: (key: string) => GenericApiClient } {
+function getTestInfo(providerId: string): { modelId: TestModelResolver; clientFactory: (key: string) => GenericApiClient } {
   switch (providerId) {
-    case 'xiaomi': return { modelId: 'mimo-v2-flash', clientFactory: (key) => new MiMoApiClient(key) };
+    case 'xiaomi': return { modelId: getLatestXiaomiChatModel, clientFactory: (key) => new MiMoApiClient(key) };
     case 'glm': return { modelId: 'glm-4.7-flash', clientFactory: (key) => new GlmApiClient(key) };
     case 'groq': return { modelId: 'llama-3.3-70b-versatile', clientFactory: (key) => new GroqApiClient(key) };
     case 'nvidia': return { modelId: 'google/gemma-4-31b-it', clientFactory: (key) => new NvidiaNimApiClient(key) };
-    default: return { modelId: 'mimo-v2-flash', clientFactory: (key) => new MiMoApiClient(key) };
+    default: return { modelId: 'mimo-v2.5-pro', clientFactory: (key) => new MiMoApiClient(key) };
   }
 }
 
@@ -157,7 +168,7 @@ export function activate(context: vscode.ExtensionContext): void {
           vscode.window.showInformationMessage('Xiaomi MiMo API key cleared');
           treeDataProvider.refresh();
         }),
-        'Test Connection': () => testConnection(xiaomiAuthManager, (key) => new MiMoApiClient(key), 'mimo-v2-flash', 'Xiaomi MiMo'),
+        'Test Connection': () => testConnection(xiaomiAuthManager, (key) => new MiMoApiClient(key), getLatestXiaomiChatModel, 'Xiaomi MiMo'),
       },
     },
     {

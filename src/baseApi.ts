@@ -52,6 +52,13 @@ export interface GenericTool {
   };
 }
 
+export interface ThinkingOption {
+  type: 'enabled' | 'disabled';
+  clear_thinking?: boolean;
+}
+
+export type ReasoningEffort = 'high' | 'max';
+
 export interface ChatOptions {
   temperature?: number;
   topP?: number;
@@ -59,6 +66,8 @@ export interface ChatOptions {
   tools?: GenericTool[];
   toolChoice?: ChatCompletionToolChoiceOption;
   stop?: string[];
+  thinking?: ThinkingOption;
+  reasoningEffort?: ReasoningEffort;
 }
 
 export class ApiError extends Error {
@@ -180,6 +189,12 @@ export class GenericApiClient {
     }
     if (options?.stop?.length) {
       params.stop = options.stop;
+    }
+    if (options?.thinking) {
+      Object.assign(params, { thinking: options.thinking });
+    }
+    if (options?.reasoningEffort) {
+      Object.assign(params, { reasoning_effort: options.reasoningEffort });
     }
 
     const tools = this.toOpenAiTools(options?.tools);

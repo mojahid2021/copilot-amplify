@@ -1,6 +1,6 @@
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions/completions';
 import * as vscode from 'vscode';
-import { ApiError, GenericApiClient } from './baseApi';
+import { ApiError, GenericApiClient, type ReasoningEffort, type ThinkingOption } from './baseApi';
 import type { BaseAuthManager } from './baseAuth';
 import { convertMessages, convertTools, parseToolArguments } from './converter';
 import { type ThinkingState, processThinkingContent } from './thinking';
@@ -9,6 +9,66 @@ interface ToolCallBuilder {
   id: string;
   name: string;
   arguments: string;
+}
+
+interface ReasoningDelta {
+  reasoning_content?: string | null;
+}
+
+type LanguageModelThinkingPartCtor = new (
+  value: string | string[],
+  id?: string,
+  metadata?: { readonly [key: string]: unknown },
+) => vscode.LanguageModelResponsePart;
+
+interface VscodeWithThinkingPart {
+  LanguageModelThinkingPart?: LanguageModelThinkingPartCtor;
+}
+
+interface ResponseOptionsWithModelConfiguration extends vscode.ProvideLanguageModelChatResponseOptions {
+  readonly modelConfiguration?: { readonly [name: string]: unknown };
+}
+
+const STRUCTURED_THINKING_OPEN = '<details><summary>Thinking</summary>\n\n';
+const STRUCTURED_THINKING_CLOSE = '\n\n</details>\n\n';
+
+function getThinkingPartCtor(): LanguageModelThinkingPartCtor | undefined {
+  return (vscode as typeof vscode & VscodeWithThinkingPart).LanguageModelThinkingPart;
+}
+
+function escapeMarkdownHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+}
+
+function getModelOption(
+  options: vscode.ProvideLanguageModelChatResponseOptions,
+  name: string,
+): unknown {
+  return (options as ResponseOptionsWithModelConfiguration).modelConfiguration?.[name]
+    ?? options.modelOptions?.[name];
+}
+
+function getNumberModelOption(
+  options: vscode.ProvideLanguageModelChatResponseOptions,
+  name: string,
+): number | undefined {
+  const value = getModelOption(options, name);
+  return typeof value === 'number' ? value : undefined;
+}
+
+function toGlm52ReasoningEffort(value: unknown): ReasoningEffort | undefined {
+  if (value === 'none') {
+    return undefined;
+  }
+
+  if (value === 'max' || value === 'xhigh' || value === 'ultracode') {
+    return 'max';
+  }
+
+  return 'high';
 }
 
 function estimateDataPartSize(part: vscode.LanguageModelDataPart): number {
@@ -51,7 +111,6 @@ function estimateToolResultSize(
 
 export abstract class BaseChatProvider implements vscode.LanguageModelChatProvider {
   protected abstract get baseURL(): string;
-  protected abstract get providerID(): string;
   protected abstract get providerDisplayName(): string;
   protected abstract get errorMessages(): Record<number, string>;
   protected abstract get models(): vscode.LanguageModelChatInformation[];
@@ -64,15 +123,50 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     return modelId;
   }
 
+  protected supportsThinking(_modelId: string): boolean {
+    void _modelId;
+    return false;
+  }
+
+  protected getThinkingOption(
+    modelId: string,
+    options: vscode.ProvideLanguageModelChatResponseOptions,
+  ): ThinkingOption | undefined {
+    if (!this.supportsThinking(modelId)) {
+      return undefined;
+    }
+
+    const reasoningEffort = getModelOption(options, 'reasoningEffort');
+    return {
+      type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
+      clear_thinking: true,
+    };
+  }
+
+  protected getReasoningEffort(
+    modelId: string,
+    options: vscode.ProvideLanguageModelChatResponseOptions,
+  ): ReasoningEffort | undefined {
+    if (!this.supportsThinking(modelId) || modelId !== 'glm-5.2') {
+      return undefined;
+    }
+
+    return toGlm52ReasoningEffort(getModelOption(options, 'reasoningEffort'));
+  }
+
   constructor(protected readonly authManager: BaseAuthManager) {
     this.onDidChangeLanguageModelChatInformation = authManager.onDidChangeApiKey;
     this.authManager.onDidChangeApiKey(() => this.clientCache.clear());
   }
 
+  protected getApiClient(apiKey: string): GenericApiClient {
+    return new GenericApiClient(apiKey, this.baseURL, this.providerDisplayName);
+  }
+
   protected getOrCreateClient(apiKey: string): GenericApiClient {
     let client = this.clientCache.get(apiKey);
     if (!client) {
-      client = new GenericApiClient(apiKey, this.baseURL, this.providerDisplayName);
+      client = this.getApiClient(apiKey);
       this.clientCache.set(apiKey, client);
     }
     return client;
@@ -167,12 +261,13 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   ): Promise<void> {
     const toolCallBuilders = new Map<number, ToolCallBuilder>();
     let thinkingState: ThinkingState = { buffer: '', insideThinking: false };
+    let structuredReasoningActive = false;
 
     const stream = client.streamChat(
       this.mapModelId(model.id),
       convertMessages(messages, model.capabilities.imageInput === true),
       {
-        maxTokens: options.modelOptions?.maxTokens as number | undefined,
+        maxTokens: getNumberModelOption(options, 'maxTokens'),
         tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
         toolChoice:
           model.capabilities.toolCalling && options.tools?.length
@@ -180,6 +275,8 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
               ? 'required'
               : 'auto'
             : undefined,
+        thinking: this.getThinkingOption(model.id, options),
+        reasoningEffort: this.getReasoningEffort(model.id, options),
       },
       token,
     );
@@ -190,15 +287,68 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
       }
 
       for (const choice of chunk.choices) {
-        thinkingState = this.reportTextDelta(choice.delta.content, thinkingState, progress);
+        const reasoning = (choice.delta as ReasoningDelta).reasoning_content;
+        if (reasoning) {
+          this.reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
+          structuredReasoningActive = true;
+        }
+        if (choice.delta.content) {
+          if (structuredReasoningActive) {
+            this.closeStructuredReasoning(progress);
+            structuredReasoningActive = false;
+          }
+          thinkingState = this.reportTextDelta(choice.delta.content, thinkingState, progress);
+        }
         this.collectToolCalls(choice.delta.tool_calls, toolCallBuilders);
         if (choice.finish_reason === 'tool_calls') {
+          if (structuredReasoningActive) {
+            this.closeStructuredReasoning(progress);
+            structuredReasoningActive = false;
+          }
           this.reportToolCalls(progress, toolCallBuilders);
         }
       }
     }
 
+    if (structuredReasoningActive) {
+      this.closeStructuredReasoning(progress);
+    }
+
     this.reportToolCalls(progress, toolCallBuilders);
+  }
+
+  private reportStructuredReasoningDelta(
+    reasoning: string,
+    isActive: boolean,
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+  ): void {
+    if (!reasoning) {
+      return;
+    }
+
+    const ThinkingPart = getThinkingPartCtor();
+    if (ThinkingPart) {
+      progress.report(new ThinkingPart(reasoning));
+      return;
+    }
+
+    if (!isActive) {
+      progress.report(new vscode.LanguageModelTextPart(STRUCTURED_THINKING_OPEN));
+    }
+
+    progress.report(new vscode.LanguageModelTextPart(escapeMarkdownHtml(reasoning)));
+  }
+
+  private closeStructuredReasoning(
+    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
+  ): void {
+    const ThinkingPart = getThinkingPartCtor();
+    if (ThinkingPart) {
+      progress.report(new ThinkingPart('', '', { vscode_reasoning_done: true }));
+      return;
+    }
+
+    progress.report(new vscode.LanguageModelTextPart(STRUCTURED_THINKING_CLOSE));
   }
 
   private reportTextDelta(

@@ -1,11 +1,64 @@
 import type * as vscode from 'vscode';
 
-export const MIMO_MODELS = [
+interface LanguageModelConfigurationProperty {
+  type: 'string';
+  title: string;
+  enum: string[];
+  enumItemLabels: string[];
+  enumDescriptions: string[];
+  default: string;
+  group: 'navigation';
+}
+
+interface LanguageModelConfigurationSchema {
+  properties: Record<string, LanguageModelConfigurationProperty>;
+}
+
+interface ConfigurableLanguageModelChatInformation extends vscode.LanguageModelChatInformation {
+  configurationSchema?: LanguageModelConfigurationSchema;
+}
+
+const GLM_THINKING_CONFIGURATION: LanguageModelConfigurationSchema = {
+  properties: {
+    reasoningEffort: {
+      type: 'string',
+      title: 'Thinking Effort',
+      enum: ['none', 'high'],
+      enumItemLabels: ['None', 'High'],
+      enumDescriptions: [
+        'Disable GLM thinking for faster responses',
+        'Enable GLM thinking',
+      ],
+      default: 'high',
+      group: 'navigation',
+    },
+  },
+};
+
+const GLM_5_2_THINKING_CONFIGURATION: LanguageModelConfigurationSchema = {
+  properties: {
+    reasoningEffort: {
+      type: 'string',
+      title: 'Thinking Effort',
+      enum: ['none', 'high', 'max'],
+      enumItemLabels: ['None', 'High', 'Max'],
+      enumDescriptions: [
+        'Disable GLM thinking for faster responses',
+        'Enable GLM thinking',
+        'Enable deeper GLM thinking for complex coding tasks',
+      ],
+      default: 'high',
+      group: 'navigation',
+    },
+  },
+};
+
+export const MIMO_MODELS: vscode.LanguageModelChatInformation[] = [
   {
-    id: 'mimo-v2-pro',
-    name: 'MiMo-V2-Pro',
+    id: 'mimo-v2.5-pro',
+    name: 'MiMo-V2.5-Pro',
     family: 'mimo',
-    version: 'v2-pro',
+    version: 'v2.5-pro',
     tooltip: 'Xiaomi',
     detail: 'Xiaomi',
     maxInputTokens: 1048576,
@@ -13,21 +66,10 @@ export const MIMO_MODELS = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
-    id: 'mimo-v2-flash',
-    name: 'MiMo-V2-Flash',
+    id: 'mimo-v2.5',
+    name: 'MiMo-V2.5',
     family: 'mimo',
-    version: 'v2-flash',
-    tooltip: 'Xiaomi',
-    detail: 'Xiaomi',
-    maxInputTokens: 262144,
-    maxOutputTokens: 131072,
-    capabilities: { imageInput: false, toolCalling: true },
-  },
-  {
-    id: 'mimo-v2-omni',
-    name: 'MiMo-V2-Omni',
-    family: 'mimo',
-    version: 'v2-omni',
+    version: 'v2.5',
     tooltip: 'Xiaomi',
     detail: 'Xiaomi',
     maxInputTokens: 262144,
@@ -36,17 +78,30 @@ export const MIMO_MODELS = [
   },
 ];
 
-export const GLM_MODELS = [
+export const GLM_MODELS: ConfigurableLanguageModelChatInformation[] = [
+  {
+    id: 'glm-5.2',
+    name: 'GLM-5.2',
+    family: 'glm',
+    version: '5.2',
+    tooltip: 'Z.AI',
+    detail: 'Z.AI',
+    maxInputTokens: 1000000,
+    maxOutputTokens: 131072,
+    capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_5_2_THINKING_CONFIGURATION,
+  },
   {
     id: 'glm-5.1',
     name: 'GLM-5.1',
     family: 'glm',
     version: '5.1',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 204800,
     maxOutputTokens: 131072,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-5-turbo',
@@ -54,10 +109,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '5-turbo',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 204800,
     maxOutputTokens: 131072,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-5v-turbo',
@@ -65,10 +121,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '5v-turbo',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 204800,
     maxOutputTokens: 131072,
     capabilities: { imageInput: true, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-5',
@@ -76,10 +133,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '5',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 204800,
     maxOutputTokens: 131072,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-4.7',
@@ -87,10 +145,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '4.7',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
-    maxInputTokens: 204800,
+    detail: 'Z Adj',
+    maxInputTokens:204800,
     maxOutputTokens: 131072,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-4.7-flash',
@@ -98,10 +157,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '4.7-flash',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 204800,
     maxOutputTokens: 131072,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-4.6',
@@ -109,10 +169,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '4.6',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 204800,
     maxOutputTokens: 131072,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-4.5',
@@ -120,10 +181,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '4.5',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 131072,
     maxOutputTokens: 98304,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-4.5-air',
@@ -131,10 +193,11 @@ export const GLM_MODELS = [
     family: 'glm',
     version: '4.5-air',
     tooltip: 'Z.AI',
-    detail: 'Z.AI',
+    detail: 'Z Adj',
     maxInputTokens: 131072,
     maxOutputTokens: 98304,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
 ];
 
@@ -206,7 +269,7 @@ export const NIM_MODELS = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
-    id: 'minimaxai/minimax-m3',
+    id: 'minimax-m3',
     name: 'MiniMax M3',
     family: 'nvidia-nim',
     version: 'minimax-m3',

@@ -1,7 +1,7 @@
 import { GenericApiClient, ApiError, type GenericMessage, type GenericTool, type GenericToolCall } from './baseApi';
 
 export const BASE_URL = 'https://api.xiaomimimo.com/v1';
-export const TOKEN_PLAN_BASE_URL = 'https://token-plan-cn.xiaomimimo.com/v1';
+export const TOKEN_PLAN_BASE_URL = 'https://token-plan-sgp.xiaomimimo.com/v1';
 
 export type MiMoMessage = GenericMessage;
 export type MiMoTool = GenericTool;

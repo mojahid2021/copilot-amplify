@@ -4,7 +4,6 @@ import { BASE_URL } from './groqApi';
 
 export class GroqChatProvider extends BaseChatProvider {
   protected override readonly baseURL = BASE_URL;
-  protected override readonly providerID = 'groq';
   protected override readonly providerDisplayName = 'Groq';
   protected override readonly models = GROQ_MODELS;
 
