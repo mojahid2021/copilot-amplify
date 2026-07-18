@@ -59,18 +59,6 @@ function getNumberModelOption(
   return typeof value === 'number' ? value : undefined;
 }
 
-function toGlm52ReasoningEffort(value: unknown): ReasoningEffort | undefined {
-  if (value === 'none') {
-    return undefined;
-  }
-
-  if (value === 'max' || value === 'xhigh' || value === 'ultracode') {
-    return 'max';
-  }
-
-  return 'high';
-}
-
 function estimateDataPartSize(part: vscode.LanguageModelDataPart): number {
   if (
     part.mimeType.startsWith('text/')
@@ -147,11 +135,23 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     modelId: string,
     options: vscode.ProvideLanguageModelChatResponseOptions,
   ): ReasoningEffort | undefined {
-    if (!this.supportsThinking(modelId) || modelId !== 'glm-5.2') {
+    if (!this.supportsThinking(modelId)) {
       return undefined;
     }
 
-    return toGlm52ReasoningEffort(getModelOption(options, 'reasoningEffort'));
+    return this.toReasoningEffort(getModelOption(options, 'reasoningEffort'));
+  }
+
+  protected toReasoningEffort(value: unknown): ReasoningEffort | undefined {
+    if (value === 'none') {
+      return undefined;
+    }
+
+    if (value === 'max' || value === 'xhigh' || value === 'ultracode') {
+      return 'max';
+    }
+
+    return 'high';
   }
 
   constructor(protected readonly authManager: BaseAuthManager) {

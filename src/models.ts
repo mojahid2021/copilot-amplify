@@ -53,6 +53,23 @@ const GLM_5_2_THINKING_CONFIGURATION: LanguageModelConfigurationSchema = {
   },
 };
 
+const QWQ_THINKING_CONFIGURATION: LanguageModelConfigurationSchema = {
+  properties: {
+    reasoningEffort: {
+      type: 'string',
+      title: 'Thinking Effort',
+      enum: ['none', 'high'],
+      enumItemLabels: ['None', 'High'],
+      enumDescriptions: [
+        'Disable QwQ thinking for faster responses',
+        'Enable QwQ thinking',
+      ],
+      default: 'high',
+      group: 'navigation',
+    },
+  },
+};
+
 export const MIMO_MODELS: vscode.LanguageModelChatInformation[] = [
   {
     id: 'mimo-v2.5-pro',
@@ -201,7 +218,7 @@ export const GLM_MODELS: ConfigurableLanguageModelChatInformation[] = [
   },
 ];
 
-export const NIM_MODELS = [
+export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
   {
     id: 'gemma-4-31b-it',
     name: 'Gemma 4 31B IT',
@@ -322,6 +339,19 @@ export const NIM_MODELS = [
     maxInputTokens: 131072,
     maxOutputTokens: 16384,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
+  },
+  {
+    id: 'glm-5.2',
+    name: 'GLM-5.2',
+    family: 'nvidia-nim',
+    version: 'glm-5.2',
+    tooltip: 'NVIDIA NIM',
+    detail: 'NVIDIA',
+    maxInputTokens: 1000000,
+    maxOutputTokens: 16384,
+    capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_5_2_THINKING_CONFIGURATION,
   },
   {
     id: 'glm-4.7',
@@ -333,6 +363,7 @@ export const NIM_MODELS = [
     maxInputTokens: 204800,
     maxOutputTokens: 16384,
     capabilities: { imageInput: false, toolCalling: true },
+    configurationSchema: GLM_THINKING_CONFIGURATION,
   },
   {
     id: 'devstral-2-123b-instruct-2512',
@@ -421,6 +452,7 @@ export const NIM_MODELS = [
     maxInputTokens: 131072,
     maxOutputTokens: 32768,
     capabilities: { imageInput: false, toolCalling: false },
+    configurationSchema: QWQ_THINKING_CONFIGURATION,
   },
   {
     id: 'falcon3-7b-instruct',

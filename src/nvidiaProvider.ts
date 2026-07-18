@@ -1,6 +1,7 @@
 import { BaseChatProvider } from './baseProvider';
 import { NIM_MODELS } from './models';
 import { BASE_URL } from './nvidiaApi';
+import type * as vscode from 'vscode';
 
 const NIM_MODEL_ID_MAP: Record<string, string> = {
   'gemma-4-31b-it': 'google/gemma-4-31b-it',
@@ -14,6 +15,7 @@ const NIM_MODEL_ID_MAP: Record<string, string> = {
   'step-3.5-flash': 'stepfun-ai/step-3.5-flash',
   'step-3.7-flash': 'stepfun-ai/step-3.7-flash',
   'glm-5.1': 'z-ai/glm-5.1',
+  'glm-5.2': 'z-ai/glm-5.2',
   'glm-4.7': 'z-ai/glm-4.7',
   'devstral-2-123b-instruct-2512': 'mistralai/devstral-2-123b-instruct-2512',
   'kimi-k2-instruct-0905': 'moonshotai/kimi-k2-instruct-0905',
@@ -26,13 +28,19 @@ const NIM_MODEL_ID_MAP: Record<string, string> = {
   'falcon3-7b-instruct': 'tiiuae/falcon3-7b-instruct',
 };
 
+const NIM_THINKING_MODELS = new Set(['glm-5.2', 'glm-5.1', 'glm-4.7', 'qwq-32b']);
+
 export class NvidiaChatProvider extends BaseChatProvider {
   protected override readonly baseURL = BASE_URL;
   protected override readonly providerDisplayName = 'NVIDIA NIM';
-  protected override readonly models = NIM_MODELS;
+  protected override readonly models: vscode.LanguageModelChatInformation[] = NIM_MODELS;
 
   protected override mapModelId(modelId: string): string {
     return NIM_MODEL_ID_MAP[modelId] ?? modelId;
+  }
+
+  protected override supportsThinking(modelId: string): boolean {
+    return NIM_THINKING_MODELS.has(modelId);
   }
 
   protected override readonly errorMessages: Record<number, string> = {
