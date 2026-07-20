@@ -68,6 +68,7 @@ export interface ChatOptions {
   stop?: string[];
   thinking?: ThinkingOption;
   reasoningEffort?: ReasoningEffort;
+  extraBody?: Record<string, unknown>;
 }
 
 export class ApiError extends Error {
@@ -195,6 +196,9 @@ export class GenericApiClient {
     }
     if (options?.reasoningEffort) {
       Object.assign(params, { reasoning_effort: options.reasoningEffort });
+    }
+    if (options?.extraBody) {
+      Object.assign(params, { extra_body: options.extraBody });
     }
 
     const tools = this.toOpenAiTools(options?.tools);

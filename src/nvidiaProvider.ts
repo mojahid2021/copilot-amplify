@@ -26,6 +26,7 @@ const NIM_MODEL_ID_MAP: Record<string, string> = {
   'granite-3.3-8b-instruct': 'ibm/granite-3.3-8b-instruct',
   'qwq-32b': 'qwen/qwq-32b',
   'falcon3-7b-instruct': 'tiiuae/falcon3-7b-instruct',
+  'laguna-xs-2.1': 'poolside/laguna-xs-2.1',
 };
 
 const NIM_THINKING_MODELS = new Set(['glm-5.2', 'glm-5.1', 'glm-4.7', 'qwq-32b']);
@@ -41,6 +42,10 @@ export class NvidiaChatProvider extends BaseChatProvider {
 
   protected override supportsThinking(modelId: string): boolean {
     return NIM_THINKING_MODELS.has(modelId);
+  }
+
+  protected override getExtraBody(_modelId: string): Record<string, unknown> | undefined {
+    return undefined;
   }
 
   protected override readonly errorMessages: Record<number, string> = {

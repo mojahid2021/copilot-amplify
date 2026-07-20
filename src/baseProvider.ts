@@ -43,7 +43,7 @@ function escapeMarkdownHtml(value: string): string {
     .replaceAll('>', '&gt;');
 }
 
-function getModelOption(
+export function getModelOption(
   options: vscode.ProvideLanguageModelChatResponseOptions,
   name: string,
 ): unknown {
@@ -129,6 +129,10 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
       type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
       clear_thinking: true,
     };
+  }
+
+  protected getExtraBody(_modelId: string): Record<string, unknown> | undefined {
+    return undefined;
   }
 
   protected getReasoningEffort(
@@ -276,8 +280,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
               : 'auto'
             : undefined,
         thinking: this.getThinkingOption(model.id, options),
-        reasoningEffort: this.getReasoningEffort(model.id, options),
-      },
+        reasoningEffort: this.getReasoningEffort(model.id, options),        extraBody: this.getExtraBody(model.id),      },
       token,
     );
 

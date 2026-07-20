@@ -465,6 +465,17 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     maxOutputTokens: 8192,
     capabilities: { imageInput: false, toolCalling: false },
   },
+  {
+    id: 'laguna-xs-2.1',
+    name: 'Laguna XS 2.1',
+    family: 'nvidia-nim',
+    version: 'laguna-xs-2.1',
+    tooltip: 'NVIDIA NIM',
+    detail: 'NVIDIA',
+    maxInputTokens: 262144,
+    maxOutputTokens: 8192,
+    capabilities: { imageInput: false, toolCalling: true },
+  },
 ];
 
 export const GROQ_MODELS: vscode.LanguageModelChatInformation[] = [
