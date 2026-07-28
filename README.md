@@ -64,17 +64,12 @@
 | **Nemotron 3 Ultra 550B** (`nvidia/nemotron-3-ultra-550b-a55b`) | 1,048,576 | 16,384 | No | Yes |
 | **Nemotron 3 Super 120B** (`nvidia/nemotron-3-super-120b-a12b`) | 1,048,576 | 16,384 | No | Yes |
 | **DeepSeek V4 Flash** (`deepseek-ai/deepseek-v4-flash`) | 1,048,576 | 16,384 | No | Yes |
-| **MiniMax M2.7** (`minimaxai/minimax-m2.7`) | 204,800 | 16,384 | No | Yes |
 | **MiniMax M3** (`minimaxai/minimax-m3`) | 1,048,576 | 16,384 | Yes | Yes |
-| **MiniMax M2.5** (`minimaxai/minimax-m2.5`) | 204,800 | 16,384 | No | Yes |
 | **Step 3.5 Flash** (`stepfun-ai/step-3.5-flash`) | 262,144 | 16,384 | No | Yes |
-| **GLM-5.1** (`z-ai/glm-5.1`) | 131,072 | 16,384 | No | Yes |
-| **GLM-4.7** (`z-ai/glm-4.7`) | 204,800 | 16,384 | No | Yes |
+| **GLM-5.2** (`z-ai/glm-5.2`) | 1,000,000 | 16,384 | No | Yes |
 | **Devstral 2 123B Instruct** (`mistralai/devstral-2-123b-instruct-2512`) | 262,144 | 16,384 | No | Yes |
-| **Kimi K2 Instruct 0905** (`moonshotai/kimi-k2-instruct-0905`) | 262,144 | 16,384 | No | Yes |
 | **Kimi K2.6** (`moonshotai/kimi-k2.6`) | 262,144 | 16,384 | Yes | Yes |
 | **Qwen3 Coder 480B** (`qwen/qwen3-coder-480b-a35b-instruct`) | 262,144 | 16,384 | No | Yes |
-| **Kimi K2 Instruct** (`moonshotai/kimi-k2-instruct`) | 131,072 | 16,384 | No | Yes |
 | **Magistral Small 2506** (`mistralai/magistral-small-2506`) | 131,072 | 16,384 | No | No |
 | **Granite 3.3 8B Instruct** (`ibm/granite-3.3-8b-instruct`) | 131,072 | 8,192 | No | Yes |
 | **QwQ 32B** (`qwen/qwq-32b`) | 131,072 | 32,768 | No | No |

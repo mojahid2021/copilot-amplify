@@ -9,27 +9,21 @@ const NIM_MODEL_ID_MAP: Record<string, string> = {
   'nemotron-3-super-120b-a12b': 'nvidia/nemotron-3-super-120b-a12b',
   'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
   'deepseek-v4-pro': 'deepseek-ai/deepseek-v4-pro',
-  'minimax-m2.7': 'minimaxai/minimax-m2.7',
   'minimax-m3': 'minimaxai/minimax-m3',
-  'minimax-m2.5': 'minimaxai/minimax-m2.5',
   'step-3.5-flash': 'stepfun-ai/step-3.5-flash',
   'step-3.7-flash': 'stepfun-ai/step-3.7-flash',
-  'glm-5.1': 'z-ai/glm-5.1',
   'glm-5.2': 'z-ai/glm-5.2',
-  'glm-4.7': 'z-ai/glm-4.7',
   'devstral-2-123b-instruct-2512': 'mistralai/devstral-2-123b-instruct-2512',
-  'kimi-k2-instruct-0905': 'moonshotai/kimi-k2-instruct-0905',
   'kimi-k2.6': 'moonshotai/kimi-k2.6',
   'qwen3-coder-480b-a35b-instruct': 'qwen/qwen3-coder-480b-a35b-instruct',
-  'kimi-k2-instruct': 'moonshotai/kimi-k2-instruct',
-  'magistral-small-2506': 'mistralai/magistral-small-2506',
   'granite-3.3-8b-instruct': 'ibm/granite-3.3-8b-instruct',
   'qwq-32b': 'qwen/qwq-32b',
   'falcon3-7b-instruct': 'tiiuae/falcon3-7b-instruct',
   'laguna-xs-2.1': 'poolside/laguna-xs-2.1',
+  'llama-3.3-70b-instruct': 'meta/llama-3.3-70b-instruct',
 };
 
-const NIM_THINKING_MODELS = new Set(['glm-5.2', 'glm-5.1', 'glm-4.7', 'qwq-32b']);
+const NIM_THINKING_MODELS = new Set(['glm-5.2', 'qwq-32b']);
 
 export class NvidiaChatProvider extends BaseChatProvider {
   protected override readonly baseURL = BASE_URL;
@@ -42,10 +36,6 @@ export class NvidiaChatProvider extends BaseChatProvider {
 
   protected override supportsThinking(modelId: string): boolean {
     return NIM_THINKING_MODELS.has(modelId);
-  }
-
-  protected override getExtraBody(_modelId: string): Record<string, unknown> | undefined {
-    return undefined;
   }
 
   protected override readonly errorMessages: Record<number, string> = {
