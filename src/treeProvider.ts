@@ -6,20 +6,22 @@ import {
   GROQ_MODELS,
   NIM_MODELS,
 } from './models';
+import { fetchOmnirouteModels, decodeOmnirouteModelId } from './omnirouteProvider';
 
 // ─── Provider metadata ───────────────────────────────────────────────────────
 
 interface ProviderMeta {
   brand:     string;
-  modelCount: number;
+  modelCount: number | 'live';
   icon:      string;
 }
 
 const PROVIDER_META: Record<string, ProviderMeta> = {
-  xiaomi: { brand: 'Xiaomi MiMo', modelCount: MIMO_MODELS.length, icon: 'device-mobile' },
-  glm:    { brand: 'Z.ai GLM',    modelCount: GLM_MODELS.length,  icon: 'hubot'         },
-  groq:   { brand: 'Groq',        modelCount: GROQ_MODELS.length, icon: 'rocket'        },
-  nvidia: { brand: 'NVIDIA NIM',   modelCount: NIM_MODELS.length,  icon: 'server'        },
+  xiaomi:    { brand: 'Xiaomi MiMo', modelCount: MIMO_MODELS.length, icon: 'device-mobile' },
+  glm:       { brand: 'Z.ai GLM',    modelCount: GLM_MODELS.length,  icon: 'hubot'         },
+  groq:      { brand: 'Groq',        modelCount: GROQ_MODELS.length, icon: 'rocket'        },
+  nvidia:    { brand: 'NVIDIA NIM',  modelCount: NIM_MODELS.length,  icon: 'server'        },
+  omniroute: { brand: 'Omniroute',   modelCount: 'live',             icon: 'circuit-board' },
 };
 
 // ─── Tree item interfaces ────────────────────────────────────────────────────
@@ -68,6 +70,7 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     private readonly glmAuth:    BaseAuthManager,
     private readonly groqAuth:   BaseAuthManager,
     private readonly nvidiaAuth: BaseAuthManager,
+    private readonly omnirouteAuth: BaseAuthManager,
   ) {}
 
   refresh(): void {
@@ -109,40 +112,46 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   // ── PROVIDERS section ───────────────────────────────────────────────────────
 
   private async getProviderItems(): Promise<ProviderTreeItem[]> {
-    const [k1, k2, k3, k4] = await Promise.all([
+    const [k1, k2, k3, k4, k5] = await Promise.all([
       this.xiaomiAuth.getApiKey(),
       this.glmAuth.getApiKey(),
       this.groqAuth.getApiKey(),
       this.nvidiaAuth.getApiKey(),
+      this.omnirouteAuth.getApiKey(),
     ]);
     return [
-      this.mkProviderItem('xiaomi', Boolean(k1)),
-      this.mkProviderItem('glm',    Boolean(k2)),
-      this.mkProviderItem('groq',   Boolean(k3)),
-      this.mkProviderItem('nvidia', Boolean(k4)),
+      this.mkProviderItem('xiaomi',    Boolean(k1)),
+      this.mkProviderItem('glm',       Boolean(k2)),
+      this.mkProviderItem('groq',      Boolean(k3)),
+      this.mkProviderItem('nvidia',    Boolean(k4)),
+      this.mkProviderItem('omniroute', true, k5 ? '✓ Connected (Key)' : '✓ Connected (Local)'),
     ];
   }
 
-  private mkProviderItem(id: string, hasKey: boolean): ProviderTreeItem {
+  private mkProviderItem(id: string, hasKey: boolean, customStatus?: string): ProviderTreeItem {
     const meta      = PROVIDER_META[id];
-    const statusTxt = hasKey ? '✓ Connected' : '⚠ Not configured';
+    const statusTxt = customStatus ?? (hasKey ? '✓ Connected' : '⚠ Not configured');
+    const countTxt  = meta.modelCount === 'live' ? 'live' : `${meta.modelCount} models`;
     const item      = new vscode.TreeItem(meta.brand, vscode.TreeItemCollapsibleState.None) as ProviderTreeItem;
 
     item.providerId   = id;
     item.contextValue = 'provider';
-    item.description  = `${statusTxt}  ·  ${meta.modelCount} models`;
+    item.description  = `${statusTxt}  ·  ${countTxt}`;
     item.iconPath     = new vscode.ThemeIcon(meta.icon, new vscode.ThemeColor(hasKey ? 'testing.iconPassed' : 'testing.iconFailed'));
-    item.tooltip      = this.providerTooltip(meta.brand, hasKey, meta.modelCount);
+    item.tooltip      = this.providerTooltip(meta.brand, hasKey, meta.modelCount, customStatus);
     item.command      = { command: 'copilot-amplify.provider.click', title: 'Open Provider', arguments: [item] };
     return item;
   }
 
-  private providerTooltip(brand: string, hasKey: boolean, modelCount: number): vscode.MarkdownString {
-    const statusMd = hasKey
-      ? '**Status:**  ✓ Connected'
-      : '**Status:**  ⚠ Not configured';
+  private providerTooltip(brand: string, hasKey: boolean, modelCount: number | 'live', customStatus?: string): vscode.MarkdownString {
+    const statusMd = customStatus
+      ? `**Status:**  ${customStatus}`
+      : (hasKey ? '**Status:**  ✓ Connected' : '**Status:**  ⚠ Not configured');
+    const countMd = modelCount === 'live'
+      ? '**Models available:** Live (fetched from server)'
+      : `**Models available:** ${modelCount}`;
     const md = new vscode.MarkdownString(
-      `### ${brand}\n\n${statusMd}\n**Models available:** ${modelCount}\n\nRight-click the row to set API key, test connection, or clear key.`,
+      `### ${brand}\n\n${statusMd}\n${countMd}\n\nRight-click the row to set API key, test connection, or clear key.`,
     );
     md.isTrusted = true;
     return md;
@@ -152,30 +161,33 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
 
   private getModelItems(): AnyTreeItem[] {
     return Object.entries(PROVIDER_META).map(([id, meta]) => {
+      const countTxt = meta.modelCount === 'live' ? 'live (fetched)' : `${meta.modelCount} models`;
       const header = new vscode.TreeItem(
-        `${meta.brand}  ·  ${meta.modelCount} models`,
+        `${meta.brand}  ·  ${countTxt}`,
         vscode.TreeItemCollapsibleState.Collapsed,
       ) as ModelGroupTreeItem;
       header.modelId      = id;
       header.contextValue = 'model-group';
       header.iconPath     = new vscode.ThemeIcon(meta.icon);
-      header.description  = `Click to see all ${meta.modelCount} models`;
+      header.description  = meta.modelCount === 'live'
+        ? 'Click to expand — fetched live from the local Omniroute server'
+        : `Click to see all ${meta.modelCount} models`;
       header.tooltip      = new vscode.MarkdownString(
-        `**${meta.brand}** — ${meta.modelCount} models available.\n\nClick to expand and see all model IDs.`,
+        `**${meta.brand}** — ${countTxt}.\n\nClick to expand and see model IDs.`,
       );
       return header;
     });
   }
 
-  private getModelsForProvider(providerId: string): ModelTreeItem[] {
-    const models = this.getModelListForProvider(providerId);
+  private async getModelsForProvider(providerId: string): Promise<ModelTreeItem[]> {
+    const models = await this.getModelListForProvider(providerId);
     const meta   = PROVIDER_META[providerId];
     if (!meta) { return []; }
     return models.map((model) => {
       const item = new vscode.TreeItem(model.name, vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
       item.modelId      = model.id;
       item.contextValue = 'model';
-      item.iconPath     = new vscode.ThemeIcon('symbol-method');
+      item.iconPath     = new vscode.ThemeIcon(model.id === 'error' ? 'warning' : 'symbol-method');
       item.description  = model.id;
       item.tooltip      = new vscode.MarkdownString(
         `**${model.name}**\n\nModel ID: \`${model.id}\`\nProvider: ${meta.brand}`,
@@ -184,13 +196,26 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     });
   }
 
-  private getModelListForProvider(providerId: string): Array<{ id: string; name: string }> {
+  private async getModelListForProvider(providerId: string): Promise<Array<{ id: string; name: string }>> {
     switch (providerId) {
-      case 'xiaomi': return MIMO_MODELS.map((m) => ({ id: m.id, name: m.name }));
-      case 'glm':    return GLM_MODELS.map((m) => ({ id: m.id, name: m.name }));
-      case 'groq':   return GROQ_MODELS.map((m) => ({ id: m.id, name: m.name }));
-      case 'nvidia': return NIM_MODELS.map((m) => ({ id: m.id, name: m.name }));
-      default:       return [];
+      case 'xiaomi':    return MIMO_MODELS.map((m) => ({ id: m.id, name: m.name }));
+      case 'glm':       return GLM_MODELS.map((m) => ({ id: m.id, name: m.name }));
+      case 'groq':      return GROQ_MODELS.map((m) => ({ id: m.id, name: m.name }));
+      case 'nvidia':    return NIM_MODELS.map((m) => ({ id: m.id, name: m.name }));
+      case 'omniroute': {
+        try {
+          const apiKey = (await this.omnirouteAuth.getApiKey()) || 'omniroute';
+          const live = await fetchOmnirouteModels(apiKey);
+          return live.map((m) => ({
+            id: decodeOmnirouteModelId(m.id),
+            name: m.name ?? decodeOmnirouteModelId(m.id),
+          }));
+        } catch (err) {
+          const details = err instanceof Error ? err.message : String(err);
+          return [{ id: 'error', name: `Server unreachable (${details})` }];
+        }
+      }
+      default:          return [];
     }
   }
 

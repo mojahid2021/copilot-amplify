@@ -5,6 +5,8 @@ import { MiMoApiClient } from './api';
 import { GlmApiClient } from './glmApi';
 import { GroqApiClient } from './groqApi';
 import { NvidiaNimApiClient } from './nvidiaApi';
+import { OmnirouteApiClient } from './omnirouteApi';
+import { fetchOmnirouteModels, decodeOmnirouteModelId, resolveOmnirouteUpstreamModelId } from './omnirouteProvider';
 import {
   MIMO_MODELS,
   GLM_MODELS,
@@ -21,16 +23,35 @@ export interface ChatProviderConfig {
   id: string;
   displayName: string;
   authManager: BaseAuthManager;
-  apiClientFactory: (apiKey: string) => GenericApiClient;
+  apiClientFactory: (apiKey: string, sessionId?: string) => GenericApiClient;
   defaultModel: string;
+  /** Static fallback used when no dynamic loader is provided. */
   models: ModelInfo[];
+  /**
+   * Optional dynamic loader — when present, the chat panel calls this each time
+   * the user switches to this provider so the dropdown reflects the live list
+   * instead of the bundled fallback.
+   */
+  loadModels?: (apiKey: string) => Promise<ModelInfo[]>;
+  /**
+   * Optional resolver converting the dropdown model id into the id sent to the
+   * server (e.g. OmniRoute's no-thinking variants resolve to the real model).
+   */
+  resolveModelId?: (id: string) => string;
+  /** Whether the provider works without explicit API key stored in secrets. */
+  allowZeroConfigApiKey?: boolean;
+}
+
+function generateSessionId(): string {
+  return `omniroute-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 export function buildProviderConfigs(
   xiaomiAuth: BaseAuthManager,
-  glmAuth:    BaseAuthManager,
-  groqAuth:   BaseAuthManager,
+  glmAuth: BaseAuthManager,
+  groqAuth: BaseAuthManager,
   nvidiaAuth: BaseAuthManager,
+  omnirouteAuth: BaseAuthManager,
 ): ChatProviderConfig[] {
   return [
     {
@@ -60,6 +81,19 @@ export function buildProviderConfigs(
       apiClientFactory: (k) => new NvidiaNimApiClient(k),
       defaultModel: 'google/gemma-4-31b-it',
       models: NIM_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
+    },
+    {
+      id: 'omniroute', displayName: 'Omniroute',
+      authManager: omnirouteAuth,
+      apiClientFactory: (k, sessionId) => new OmnirouteApiClient(k, { sessionId }),
+      defaultModel: 'auto/best-fast',
+      models: [],
+      loadModels: async (apiKey) => {
+        const live = await fetchOmnirouteModels(apiKey);
+        return live.map((m) => ({ id: decodeOmnirouteModelId(m.id), name: m.name ?? m.id }));
+      },
+      resolveModelId: resolveOmnirouteUpstreamModelId,
+      allowZeroConfigApiKey: true,
     },
   ];
 }
@@ -282,6 +316,7 @@ function buildHtml(): string {
     <option value="glm">Z.ai GLM</option>
     <option value="groq">Groq</option>
     <option value="nvidia">NVIDIA NIM</option>
+    <option value="omniroute">Omniroute</option>
   </select>
   <select id="model-select" class="model-select"></select>
   <div class="header-right">
@@ -314,6 +349,7 @@ class ChatPanel {
   private currentProviderId = 'xiaomi';
   private selectedModelId: string = 'mimo-v2.5-pro';
   private conversation: ChatMessage[] = [];
+  private sessionId = generateSessionId();
 
   constructor(
     public readonly panel: vscode.WebviewPanel,
@@ -329,6 +365,7 @@ class ChatPanel {
       case 'changeProvider':
         this.currentProviderId = msg.providerId as string;
         this.conversation = [];
+        this.sessionId = generateSessionId();
         this.selectedModelId = this.getCurrentConfig()?.defaultModel ?? '';
         this.panel.webview.postMessage({ type: 'cleared' });
         await this.refreshState();
@@ -352,14 +389,33 @@ class ChatPanel {
   private async refreshState(): Promise<void> {
     const cfg = this.getCurrentConfig();
     if (!cfg) return;
-    const apiKey = await cfg.authManager.getApiKey();
+    const storedApiKey = await cfg.authManager.getApiKey();
+    const effectiveApiKey = storedApiKey || (cfg.allowZeroConfigApiKey ? 'omniroute' : undefined);
+    const hasKey = cfg.allowZeroConfigApiKey || Boolean(storedApiKey);
     this.selectedModelId = cfg.defaultModel;
+
+    // Dynamic providers (e.g. Omniroute) load their model list live.
+    let models = cfg.models;
+    if (cfg.loadModels && effectiveApiKey) {
+      try {
+        models = await cfg.loadModels(effectiveApiKey);
+        if (models.length > 0 && !models.some((m) => m.id === this.selectedModelId)) {
+          this.selectedModelId = cfg.defaultModel && models.some((m) => m.id === cfg.defaultModel)
+            ? cfg.defaultModel
+            : models[0].id;
+        }
+      } catch (err) {
+        const details = err instanceof Error ? err.message : String(err);
+        console.warn(`[${cfg.displayName}] live model load failed (${details}); using bundled list.`);
+      }
+    }
+
     this.panel.webview.postMessage({
       type: 'state',
       providerId: cfg.id,
-      models: cfg.models,
-      defaultModelId: cfg.defaultModel,
-      apiKeyConfigured: Boolean(apiKey),
+      models,
+      defaultModelId: this.selectedModelId || cfg.defaultModel,
+      apiKeyConfigured: hasKey,
       displayName: cfg.displayName,
     });
   }
@@ -368,15 +424,17 @@ class ChatPanel {
     const cfg = this.getCurrentConfig();
     if (!cfg) return;
 
-    const apiKey = await cfg.authManager.getApiKey();
+    const storedApiKey = await cfg.authManager.getApiKey();
+    const apiKey = storedApiKey || (cfg.allowZeroConfigApiKey ? 'omniroute' : undefined);
     if (!apiKey) {
       this.panel.webview.postMessage({ type: 'error', message: `${cfg.displayName} API key is not configured. Set it via the Providers panel.` });
       return;
     }
 
-    const actualModel = modelId || this.selectedModelId || cfg.defaultModel;
+    const rawModel = modelId || this.selectedModelId || cfg.defaultModel;
+    const actualModel = cfg.resolveModelId ? cfg.resolveModelId(rawModel) : rawModel;
     this.abortCtrl = new AbortController();
-    const client = cfg.apiClientFactory(apiKey);
+    const client = cfg.apiClientFactory(apiKey, this.sessionId);
 
     this.conversation.push({ role: 'user', content: text, sender: 'You', timestamp: Date.now() });
     this.panel.webview.postMessage({ type: 'streamingStart', userText: text });

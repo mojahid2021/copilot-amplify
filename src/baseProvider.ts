@@ -11,9 +11,7 @@ interface ToolCallBuilder {
   arguments: string;
 }
 
-interface ReasoningDelta {
-  reasoning_content?: string | null;
-}
+
 
 type LanguageModelThinkingPartCtor = new (
   value: string | string[],
@@ -103,7 +101,17 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   protected abstract get errorMessages(): Record<number, string>;
   protected abstract get models(): vscode.LanguageModelChatInformation[];
 
-  readonly onDidChangeLanguageModelChatInformation: vscode.Event<void>;
+  private readonly changeEmitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeLanguageModelChatInformation: vscode.Event<void> = this.changeEmitter.event;
+
+  /**
+   * Subclasses call this after their internal model list changes (for
+   * example after a dynamic model discovery fetch completes) so VS Code
+   * re-queries the model list and refreshes the Copilot Chat picker.
+   */
+  protected fireModelInformationChanged(): void {
+    this.changeEmitter.fire();
+  }
 
   private clientCache = new Map<string, GenericApiClient>();
 
@@ -131,7 +139,8 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     };
   }
 
-  protected getExtraBody(_modelId: string): Record<string, unknown> | undefined {
+  protected getExtraBody(_modelId?: string): Record<string, unknown> | undefined {
+    void _modelId;
     return undefined;
   }
 
@@ -159,8 +168,10 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   }
 
   constructor(protected readonly authManager: BaseAuthManager) {
-    this.onDidChangeLanguageModelChatInformation = authManager.onDidChangeApiKey;
-    this.authManager.onDidChangeApiKey(() => this.clientCache.clear());
+    this.authManager.onDidChangeApiKey(() => {
+      this.clientCache.clear();
+      this.fireModelInformationChanged();
+    });
   }
 
   protected getApiClient(apiKey: string): GenericApiClient {
@@ -255,7 +266,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     return Promise.resolve(Math.ceil(totalChars / 4));
   }
 
-  private async streamResponse(
+  protected async streamResponse(
     client: GenericApiClient,
     model: vscode.LanguageModelChatInformation,
     messages: readonly vscode.LanguageModelChatRequestMessage[],
@@ -266,6 +277,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     const toolCallBuilders = new Map<number, ToolCallBuilder>();
     let thinkingState: ThinkingState = { buffer: '', insideThinking: false };
     let structuredReasoningActive = false;
+    let hasReportedAnyPart = false;
 
     const stream = client.streamChat(
       this.mapModelId(model.id),
@@ -280,7 +292,9 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
               : 'auto'
             : undefined,
         thinking: this.getThinkingOption(model.id, options),
-        reasoningEffort: this.getReasoningEffort(model.id, options),        extraBody: this.getExtraBody(model.id),      },
+        reasoningEffort: this.getReasoningEffort(model.id, options),
+        extraBody: this.getExtraBody(model.id),
+      },
       token,
     );
 
@@ -289,19 +303,40 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
         return;
       }
 
+      if (!chunk.choices || !Array.isArray(chunk.choices)) {
+        continue;
+      }
+
       for (const choice of chunk.choices) {
-        const reasoning = (choice.delta as ReasoningDelta).reasoning_content;
+        if (!choice.delta) {
+          continue;
+        }
+
+        const delta = choice.delta as Record<string, unknown>;
+        const reasoning = typeof delta.reasoning_content === 'string' ? delta.reasoning_content
+          : typeof delta.reasoning === 'string' ? delta.reasoning
+          : typeof delta.thought === 'string' ? delta.thought
+          : undefined;
+
         if (reasoning) {
           this.reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
           structuredReasoningActive = true;
+          hasReportedAnyPart = true;
         }
-        if (choice.delta.content) {
+
+        const content = typeof choice.delta.content === 'string' ? choice.delta.content
+          : typeof delta.text === 'string' ? delta.text
+          : undefined;
+
+        if (content) {
           if (structuredReasoningActive) {
             this.closeStructuredReasoning(progress);
             structuredReasoningActive = false;
           }
-          thinkingState = this.reportTextDelta(choice.delta.content, thinkingState, progress);
+          thinkingState = this.reportTextDelta(content, thinkingState, progress);
+          hasReportedAnyPart = true;
         }
+
         this.collectToolCalls(choice.delta.tool_calls, toolCallBuilders);
         if (choice.finish_reason === 'tool_calls') {
           if (structuredReasoningActive) {
@@ -309,6 +344,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
             structuredReasoningActive = false;
           }
           this.reportToolCalls(progress, toolCallBuilders);
+          hasReportedAnyPart = true;
         }
       }
     }
@@ -318,6 +354,23 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     }
 
     this.reportToolCalls(progress, toolCallBuilders);
+
+    if (!hasReportedAnyPart && !token.isCancellationRequested) {
+      console.warn(`[${this.providerDisplayName}] Streaming yielded no parts. Retrying with non-streaming completion...`);
+      const fallbackContent = await client.chatNonStreaming(
+        this.mapModelId(model.id),
+        convertMessages(messages, model.capabilities.imageInput === true),
+        {
+          maxTokens: getNumberModelOption(options, 'maxTokens'),
+          tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
+          extraBody: this.getExtraBody(model.id),
+        },
+      );
+
+      if (fallbackContent && fallbackContent.trim().length > 0) {
+        progress.report(new vscode.LanguageModelTextPart(fallbackContent));
+      }
+    }
   }
 
   private reportStructuredReasoningDelta(
@@ -430,13 +483,13 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     builders.clear();
   }
 
-  private throwUserError(message: string): never {
+  protected throwUserError(message: string): never {
     const error = new Error(message);
     error.stack = error.stack?.split('\n').slice(1).join('\n');
     throw error;
   }
 
-  private throwMappedError(error: unknown): never {
+  protected throwMappedError(error: unknown): never {
     if (!(error instanceof ApiError)) {
       throw error;
     }

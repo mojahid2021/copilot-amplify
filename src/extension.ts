@@ -6,21 +6,26 @@ import { GroqAuthManager } from './groqAuth';
 import { GroqChatProvider } from './groqProvider';
 import { NvidiaAuthManager } from './nvidiaAuth';
 import { NvidiaChatProvider } from './nvidiaProvider';
+import { OmnirouteAuthManager } from './omnirouteAuth';
+import { fetchOmnirouteModels, OmnirouteChatProvider, resolveOmnirouteUpstreamModelId } from './omnirouteProvider';
+import { getOmnirouteLogChannel } from './omnirouteApi';
 import { fetchXiaomiChatModels, MiMoChatProvider } from './provider';
 import { MiMoApiClient } from './api';
 import { GlmApiClient } from './glmApi';
 import { GroqApiClient } from './groqApi';
 import { NvidiaNimApiClient } from './nvidiaApi';
+import { OmnirouteApiClient } from './omnirouteApi';
 import { GenericApiClient } from './baseApi';
 import type { BaseAuthManager } from './baseAuth';
 import { ProvidersTreeDataProvider, ProviderTreeItem } from './treeProvider';
 import { openChatPanel, buildProviderConfigs } from './chatPanel';
 
 const PROVIDER_VENDORS = {
-  xiaomi: 'LuneCode.xiaomi',
-  glm:    'LuneCode.glm',
-  groq:   'LuneCode.groq',
-  nvidia: 'LuneCode.nvidia',
+  xiaomi:    'LuneCode.xiaomi',
+  glm:       'LuneCode.glm',
+  groq:      'LuneCode.groq',
+  nvidia:    'LuneCode.nvidia',
+  omniroute: 'LuneCode.omniroute',
 } as const;
 
 interface ProviderConfig {
@@ -40,16 +45,20 @@ async function testConnection(
   modelId: TestModelResolver,
   providerDisplayName: string,
 ): Promise<void> {
-  const key = await authManager.getApiKey();
+  let key = await authManager.getApiKey();
   if (!key) {
-    const choice = await vscode.window.showInformationMessage(
-      `${providerDisplayName} API key is not set. Would you like to set it now?`,
-      'Set API Key',
-    );
-    if (choice === 'Set API Key') {
-      await authManager.promptForApiKey();
+    if (providerDisplayName === 'Omniroute') {
+      key = 'omniroute';
+    } else {
+      const choice = await vscode.window.showInformationMessage(
+        `${providerDisplayName} API key is not set. Would you like to set it now?`,
+        'Set API Key',
+      );
+      if (choice === 'Set API Key') {
+        await authManager.promptForApiKey();
+      }
+      return;
     }
-    return;
   }
   const client = clientFactory(key);
   try {
@@ -80,16 +89,18 @@ function registerProviderSafely(
 function getAuthManager(
   id: string,
   xiaomi: AuthManager,
-  glm:    GlmAuthManager,
-  groq:   GroqAuthManager,
+  glm: GlmAuthManager,
+  groq: GroqAuthManager,
   nvidia: NvidiaAuthManager,
+  omniroute: OmnirouteAuthManager,
 ): BaseAuthManager | null {
   switch (id) {
-    case 'xiaomi': return xiaomi;
-    case 'glm':    return glm;
-    case 'groq':   return groq;
-    case 'nvidia': return nvidia;
-    default:       return null;
+    case 'xiaomi':    return xiaomi;
+    case 'glm':       return glm;
+    case 'groq':      return groq;
+    case 'nvidia':    return nvidia;
+    case 'omniroute': return omniroute;
+    default:          return null;
   }
 }
 
@@ -99,33 +110,55 @@ async function getLatestXiaomiChatModel(apiKey: string): Promise<string> {
   return model.id;
 }
 
+async function getLatestOmnirouteChatModel(apiKey: string): Promise<string> {
+  const models = await fetchOmnirouteModels(apiKey);
+  // Prefer a regular chat model over a no-thinking variant for the ping.
+  const preferred = models.find((m) => !m.id.includes('no-thinking')) ?? models[0];
+  if (!preferred) { throw new Error('Omniroute returned no chat-capable models'); }
+  // VS Code strips slashes from model IDs in the picker, so the provider encodes
+  // `/` -> `__` before exposing the model. Resolve it back here so the test
+  // request uses the real upstream id (e.g. `auto/best-coding`).
+  return resolveOmnirouteUpstreamModelId(preferred.id);
+}
+
 function getTestInfo(id: string): { modelId: TestModelResolver; clientFactory: (key: string) => GenericApiClient } {
   switch (id) {
-    case 'xiaomi': return { modelId: getLatestXiaomiChatModel, clientFactory: (k) => new MiMoApiClient(k) };
-    case 'glm':    return { modelId: 'glm-4.7-flash',            clientFactory: (k) => new GlmApiClient(k)    };
-    case 'groq':   return { modelId: 'llama-3.3-70b-versatile',  clientFactory: (k) => new GroqApiClient(k)    };
-    case 'nvidia': return { modelId: 'google/gemma-4-31b-it',    clientFactory: (k) => new NvidiaNimApiClient(k) };
-    default:       return { modelId: 'mimo-v2.5-pro',             clientFactory: (k) => new MiMoApiClient(k)    };
+    case 'xiaomi':    return { modelId: getLatestXiaomiChatModel,  clientFactory: (k) => new MiMoApiClient(k)     };
+    case 'glm':       return { modelId: 'glm-4.7-flash',           clientFactory: (k) => new GlmApiClient(k)      };
+    case 'groq':      return { modelId: 'llama-3.3-70b-versatile', clientFactory: (k) => new GroqApiClient(k)     };
+    case 'nvidia':    return { modelId: 'google/gemma-4-31b-it',   clientFactory: (k) => new NvidiaNimApiClient(k) };
+    case 'omniroute': return { modelId: getLatestOmnirouteChatModel, clientFactory: (k) => new OmnirouteApiClient(k) };
+    default:          return { modelId: 'mimo-v2.5-pro',           clientFactory: (k) => new MiMoApiClient(k)     };
   }
 }
 
 function displayName(id: string): string {
   switch (id) {
-    case 'xiaomi': return 'Xiaomi MiMo';
-    case 'glm':    return 'Z.ai GLM';
-    case 'groq':   return 'Groq';
-    case 'nvidia': return 'NVIDIA NIM';
-    default:       return id.charAt(0).toUpperCase() + id.slice(1);
+    case 'xiaomi':    return 'Xiaomi MiMo';
+    case 'glm':       return 'Z.ai GLM';
+    case 'groq':      return 'Groq';
+    case 'nvidia':    return 'NVIDIA NIM';
+    case 'omniroute': return 'Omniroute';
+    default:          return id.charAt(0).toUpperCase() + id.slice(1);
   }
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const xiaomiAuth = new AuthManager(context.secrets);
-  const glmAuth    = new GlmAuthManager(context.secrets);
-  const groqAuth   = new GroqAuthManager(context.secrets);
-  const nvidiaAuth  = new NvidiaAuthManager(context.secrets);
+  const xiaomiAuth    = new AuthManager(context.secrets);
+  const glmAuth       = new GlmAuthManager(context.secrets);
+  const groqAuth      = new GroqAuthManager(context.secrets);
+  const nvidiaAuth    = new NvidiaAuthManager(context.secrets);
+  const omnirouteAuth = new OmnirouteAuthManager(context.secrets);
 
-  const treeDataProvider = new ProvidersTreeDataProvider(xiaomiAuth, glmAuth, groqAuth, nvidiaAuth);
+  const omnirouteChatProvider = new OmnirouteChatProvider(omnirouteAuth);
+
+  const treeDataProvider = new ProvidersTreeDataProvider(
+    xiaomiAuth,
+    glmAuth,
+    groqAuth,
+    nvidiaAuth,
+    omnirouteAuth,
+  );
 
   context.subscriptions.push(
     vscode.window.createTreeView('copilot-amplify.providers', { treeDataProvider }),
@@ -180,9 +213,21 @@ export function activate(context: vscode.ExtensionContext): void {
         'Test Connection': () => testConnection(nvidiaAuth, (k) => new NvidiaNimApiClient(k), 'google/gemma-4-31b-it', 'NVIDIA NIM'),
       },
     },
+    {
+      id: 'omniroute',
+      displayName: 'Omniroute',
+      vendor: PROVIDER_VENDORS.omniroute,
+      authManager: omnirouteAuth,
+      provider: omnirouteChatProvider,
+      manageActions: {
+        'Set API Key':    () => omnirouteAuth.promptForApiKey().then(() => { omnirouteChatProvider.invalidateModelCache(); treeDataProvider.refresh(); }),
+        'Clear API Key':  () => omnirouteAuth.deleteApiKey().then(() => { vscode.window.showInformationMessage('Omniroute API key cleared'); omnirouteChatProvider.invalidateModelCache(); treeDataProvider.refresh(); }),
+        'Test Connection': () => testConnection(omnirouteAuth, (k) => new OmnirouteApiClient(k), getLatestOmnirouteChatModel, 'Omniroute'),
+      },
+    },
   ];
 
-  // Register all 4 language model providers
+  // Register all 5 language model providers
   for (const cfg of providers) {
     registerProviderSafely(context, cfg.vendor, cfg.displayName, cfg.provider);
   }
@@ -190,7 +235,11 @@ export function activate(context: vscode.ExtensionContext): void {
   // ── Commands ───────────────────────────────────────────────────────────────
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-amplify.refresh', () => treeDataProvider.refresh()),
+    vscode.commands.registerCommand('copilot-amplify.refresh', () => {
+      omnirouteChatProvider.invalidateModelCache();
+      treeDataProvider.refresh();
+      vscode.window.showInformationMessage('Refreshed providers and model lists.');
+    }),
 
     // Central manage dialog — shown as Quick Pick when "Manage Providers..." is clicked
     vscode.commands.registerCommand('copilot-amplify.manage', async () => {
@@ -209,9 +258,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('copilot-amplify.provider.click', async (item: ProviderTreeItem) => {
       const id = item?.providerId;
       if (!id) { return; }
-      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth);
+      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth, omnirouteAuth);
       if (!auth) { return; }
-      if (await auth.getApiKey()) {
+      if (id === 'omniroute' || (await auth.getApiKey())) {
         const { modelId, clientFactory } = getTestInfo(id);
         await testConnection(auth, clientFactory, modelId, displayName(id));
       } else {
@@ -224,7 +273,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('copilot-amplify.setApiKey', async (item: ProviderTreeItem) => {
       const id = item?.providerId;
       if (!id) { return; }
-      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth);
+      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth, omnirouteAuth);
       if (auth) { await auth.promptForApiKey(); treeDataProvider.refresh(); }
     }),
 
@@ -232,7 +281,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('copilot-amplify.testConnection', async (item: ProviderTreeItem) => {
       const id = item?.providerId;
       if (!id) { return; }
-      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth);
+      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth, omnirouteAuth);
       if (auth) { const { modelId, clientFactory } = getTestInfo(id); await testConnection(auth, clientFactory, modelId, displayName(id)); }
     }),
 
@@ -240,7 +289,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('copilot-amplify.clearApiKey', async (item: ProviderTreeItem) => {
       const id = item?.providerId;
       if (!id) { return; }
-      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth);
+      const auth = getAuthManager(id, xiaomiAuth, glmAuth, groqAuth, nvidiaAuth, omnirouteAuth);
       if (auth) { await auth.deleteApiKey(); vscode.window.showInformationMessage(`${displayName(id)} API key cleared`); treeDataProvider.refresh(); }
     }),
 
@@ -261,6 +310,10 @@ export function activate(context: vscode.ExtensionContext): void {
       const action = await vscode.window.showQuickPick(Object.keys(providers[3].manageActions), { placeHolder: 'Manage NVIDIA NIM' });
       if (action) { await providers[3].manageActions[action](); }
     }),
+    vscode.commands.registerCommand('copilot-amplify.omniroute.manage', async () => {
+      const action = await vscode.window.showQuickPick(Object.keys(providers[4].manageActions), { placeHolder: 'Manage Omniroute' });
+      if (action) { await providers[4].manageActions[action](); }
+    }),
 
     vscode.commands.registerCommand('copilot-amplify.documentation', () => {
       void vscode.env.openExternal(vscode.Uri.parse('https://github.com/mojahid2021/copilot-amplify#readme'));
@@ -268,10 +321,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('copilot-amplify.report', () => {
       void vscode.env.openExternal(vscode.Uri.parse('https://github.com/mojahid2021/copilot-amplify/issues/new'));
     }),
+    vscode.commands.registerCommand('copilot-amplify.omniroute.showTelemetry', () => {
+      getOmnirouteLogChannel().show(true);
+    }),
 
     // Right panel: open chat panel
     vscode.commands.registerCommand('copilot-amplify.openChat', () => {
-      const configs = buildProviderConfigs(xiaomiAuth, glmAuth, groqAuth, nvidiaAuth);
+      const configs = buildProviderConfigs(xiaomiAuth, glmAuth, groqAuth, nvidiaAuth, omnirouteAuth);
       openChatPanel(context, configs);
     }),
   );

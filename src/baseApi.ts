@@ -294,4 +294,20 @@ export class GenericApiClient {
       throw this.toApiError(error);
     }
   }
+
+  async chatNonStreaming(
+    model: string,
+    messages: GenericMessage[],
+    options?: ChatOptions,
+  ): Promise<string> {
+    try {
+      const response = await this.client.chat.completions.create(
+        this.buildNonStreamingParams(model, messages, options),
+      );
+      const content = response.choices?.[0]?.message?.content;
+      return typeof content === 'string' ? content : '';
+    } catch (error) {
+      throw this.toApiError(error);
+    }
+  }
 }

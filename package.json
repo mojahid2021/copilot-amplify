@@ -1,6 +1,6 @@
 {
   "name": "copilot-amplify",
-  "version": "1.0.15",
+  "version": "1.0.29",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
@@ -17,6 +17,7 @@
     "zai",
     "nvidia",
     "nim",
+    "omniroute",
     "ai",
     "chat",
     "copilot",
@@ -59,6 +60,52 @@
           "type": "string",
           "markdownDescription": "NVIDIA NIM API Key. Get yours from the [NVIDIA build site](https://build.nvidia.com/).",
           "secret": true
+        },
+        "copilot-amplify.omniroute.apiKey": {
+          "type": "string",
+          "markdownDescription": "Omniroute Bearer token. Configure the local Omniroute server (default `http://localhost:20128/v1`) with your provider credentials, then enter its API key here.",
+          "secret": true
+        },
+        "copilot-amplify.omniroute.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:20128/v1",
+          "markdownDescription": "Base URL of the OmniRoute server, including the `/v1` prefix. Change this if you run OmniRoute on a different host/port."
+        },
+        "copilot-amplify.omniroute.noCache": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Send `X-OmniRoute-No-Cache: true` to bypass the semantic cache for every request. Defaults to `false` (caching enabled, so repeated requests hit the cache and cost nothing)."
+        },
+        "copilot-amplify.omniroute.noMemory": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Send `x-omniroute-no-memory: true` to skip memory + skills injection for every request, avoiding the per-call token/cost overhead. Set to `false` if you want OmniRoute memory and skills to be injected (requires a stable `sessionId` to be useful)."
+        },
+        "copilot-amplify.omniroute.compression": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Per-request compression override sent via `x-omniroute-compression`. Values: `off`, `default`, `engine:<id>` (e.g. `engine:rtk`), or a named combo id. Leave empty to let OmniRoute pick."
+        },
+        "copilot-amplify.omniroute.sessionId": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Caller-supplied session/conversation tag sent via `X-OmniRoute-Session-Id`. It is persisted to `call_logs.session_tag` for per-session cost attribution and feeds memory. Leave empty to let the extension generate one per chat conversation."
+        },
+        "copilot-amplify.omniroute.progress": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Send `X-OmniRoute-Progress: true` to opt into progress events from the server."
+        },
+        "copilot-amplify.omniroute.modelCacheTtlSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 10,
+          "markdownDescription": "How long (in seconds) the discovered model list stays cached before refetching `GET /v1/models`."
+        },
+        "copilot-amplify.omniroute.logTelemetry": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Log OmniRoute response telemetry (routing decision, provider, latency, tokens, cost, cache hit/cost-saved) to the `Omniroute` output channel. Open it with the `Copilot Amplify: Show Omniroute Telemetry` command."
         }
       }
     },
@@ -76,7 +123,8 @@
         {
           "id": "copilot-amplify.providers",
           "name": "Providers",
-          "type": "tree"
+          "type": "tree",
+          "icon": "media/icon.svg"
         }
       ]
     },
@@ -132,6 +180,10 @@
       {
         "vendor": "LuneCode.nvidia",
         "displayName": "NVIDIA NIM"
+      },
+      {
+        "vendor": "LuneCode.omniroute",
+        "displayName": "Omniroute"
       }
     ],
     "commands": [
@@ -165,6 +217,11 @@
         "command": "copilot-amplify.openChat",
         "title": "Chat",
         "icon": "$(comment)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.showTelemetry",
+        "title": "Show Omniroute Telemetry",
+        "icon": "$(output)"
       }
     ]
   },

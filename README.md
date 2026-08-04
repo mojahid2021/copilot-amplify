@@ -27,6 +27,7 @@
 - **Xiaomi MiMo**: Integration for Xiaomi's AI models directly in your chat. Automatically supports both Pay-as-you-go (`sk-...`) and Token Plan (`tp-...`) API keys and routes to the correct endpoints.
 - **Z.ai (GLM)**: Support for Z.ai GLM-4 and GLM-5 models.
 - **NVIDIA NIM**: OpenAI-compatible support for models from the NVIDIA API Catalog.
+- **Omniroute**: Local OpenAI-compatible aggregator with dynamic model discovery, routing combos, semantic-cache/memory/compression headers, session tagging and cost telemetry.
 - **Native Integration**: Works seamlessly with the VS Code `LanguageModelChat` API.
 - **Advanced Capabilities**: Supports streaming responses, tool calling, and thinking block rendering.
 - **Secure Key Storage**: No leaked keys! We use VS Code's built-in Secret Storage for your API keys.
@@ -75,6 +76,47 @@
 | **QwQ 32B** (`qwen/qwq-32b`) | 131,072 | 32,768 | No | No |
 | **Falcon 3 7B Instruct** (`tiiuae/falcon3-7b-instruct`) | 32,768 | 8,192 | No | No |
 
+### Omniroute (local aggregator)
+
+Omniroute is a local OpenAI-compatible aggregator that routes requests to the
+best upstream provider for each model (combos like `auto/best-coding`) and adds
+semantic caching, memory, compression and cost attribution. Copilot Amplify
+discovers the live model list from `GET /v1/models` each time, so every combo
+and provider-prefixed model on your server appears in the Copilot Chat picker.
+
+| Feature | Notes |
+|---|---|
+| Dynamic model discovery | Live list from the server (cached 5 min, configurable) |
+| Slash-id encoding | `auto/best-coding` ⇄ `auto__best-coding` so IDs survive the Copilot picker |
+| Thinking support | Reasoning models stream reasoning; no-thinking Claude variants resolve to the real model with reasoning suppressed |
+| Cache / memory / compression headers | `X-OmniRoute-No-Cache`, `x-omniroute-no-memory`, `x-omniroute-compression` driven by settings |
+| Session tagging | `X-OmniRoute-Session-Id` per chat conversation (feeds memory + `call_logs.session_tag`) |
+| Cost telemetry | Routing decision, provider, latency, tokens, cost and cache savings logged to the `Omniroute` output channel |
+
+**Setup** — set the Omniroute API key via the Providers panel (or the
+`copilot-amplify.omniroute.apiKey` setting). If your server runs elsewhere, set
+`copilot-amplify.omniroute.baseUrl` (default `http://localhost:20128/v1`).
+
+**Settings** (`copilot-amplify.omniroute.*`):
+
+- `baseUrl` — server URL including `/v1` (default `http://localhost:20128/v1`).
+- `noCache` — send `X-OmniRoute-No-Cache: true` (default `false`, caching on).
+- `noMemory` — send `x-omniroute-no-memory: true` to skip memory + skills
+  injection (default `true` to avoid per-call token/cost overhead; set `false`
+  together with a stable `sessionId` to use OmniRoute memory).
+- `compression` — per-request compression override (`off`, `default`,
+  `engine:<id>`, or a combo id).
+- `sessionId` — fixed session tag sent via `X-OmniRoute-Session-Id` (empty =
+  one generated per chat conversation).
+- `progress` — send `X-OmniRoute-Progress: true` for progress events.
+- `modelCacheTtlSeconds` — model-list cache TTL (default `300`).
+- `logTelemetry` — log response cost/routing headers (default `true`).
+
+**Telemetry** — run **Copilot Amplify: Show Omniroute Telemetry** (or check the
+`Omniroute` output channel) to see `model`, `provider`, `route`, `latency_ms`,
+`tokens_in/out`, `cost_usd`, `cache`/`cache_hit`/`cost_saved_usd` for every
+request.
+
 ## 🚀 Usage
 
 1. **Install** the extension from the VS Code Marketplace or Open VSX.
@@ -90,6 +132,8 @@
 - `copilot-amplify.xiaomi.manage`: Manage Xiaomi provider (set/clear API key, test connection).
 - `copilot-amplify.glm.manage`: Manage Z.ai (GLM) provider (set/clear API key, test connection).
 - `copilot-amplify.nvidia.manage`: Manage NVIDIA NIM provider (set/clear API key, test connection).
+- `copilot-amplify.omniroute.manage`: Manage Omniroute provider (set/clear API key, test connection).
+- `copilot-amplify.omniroute.showTelemetry`: Show the Omniroute telemetry output channel (routing, latency, tokens, cost, cache).
 
 ## 🔒 Security & Privacy
 

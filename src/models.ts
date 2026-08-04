@@ -489,3 +489,5 @@ export const GROQ_MODELS: vscode.LanguageModelChatInformation[] = [
     capabilities: { imageInput: false, toolCalling: true },
   },
 ];
+
+
