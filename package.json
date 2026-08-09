@@ -121,8 +121,14 @@
     "views": {
       "copilot-amplify-view-container": [
         {
+          "id": "copilot-amplify.chatView",
+          "name": "Chat",
+          "type": "webview",
+          "icon": "media/icon.svg"
+        },
+        {
           "id": "copilot-amplify.providers",
-          "name": "Providers",
+          "name": "Providers & Models",
           "type": "tree",
           "icon": "media/icon.svg"
         }

@@ -19,6 +19,9 @@ import { GenericApiClient } from './baseApi';
 import type { BaseAuthManager } from './baseAuth';
 import { ProvidersTreeDataProvider, ProviderTreeItem } from './treeProvider';
 import { openChatPanel, buildProviderConfigs } from './chatPanel';
+import { SessionManager } from './sessionManager';
+import { ContextManager } from './contextManager';
+import { ChatViewProvider } from './chatViewProvider';
 
 const PROVIDER_VENDORS = {
   xiaomi:    'LuneCode.xiaomi',
@@ -151,6 +154,23 @@ export function activate(context: vscode.ExtensionContext): void {
   const omnirouteAuth = new OmnirouteAuthManager(context.secrets);
 
   const omnirouteChatProvider = new OmnirouteChatProvider(omnirouteAuth);
+
+  const sessionManager = new SessionManager(context);
+  const contextManager = new ContextManager();
+  context.subscriptions.push(contextManager);
+
+  const configs = buildProviderConfigs(xiaomiAuth, glmAuth, groqAuth, nvidiaAuth, omnirouteAuth);
+
+  const chatViewProvider = new ChatViewProvider(
+    context.extensionUri,
+    configs,
+    sessionManager,
+    contextManager,
+  );
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider),
+  );
 
   const treeDataProvider = new ProvidersTreeDataProvider(
     xiaomiAuth,
@@ -327,8 +347,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     // Right panel: open chat panel
     vscode.commands.registerCommand('copilot-amplify.openChat', () => {
-      const configs = buildProviderConfigs(xiaomiAuth, glmAuth, groqAuth, nvidiaAuth, omnirouteAuth);
-      openChatPanel(context, configs);
+      openChatPanel(context, configs, sessionManager, contextManager);
     }),
   );
 }

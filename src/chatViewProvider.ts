@@ -1,39 +1,9 @@
 import * as vscode from 'vscode';
-import type { BaseAuthManager } from './baseAuth';
-import type { GenericApiClient } from './baseApi';
-import { MiMoApiClient } from './api';
-import { GlmApiClient } from './glmApi';
-import { GroqApiClient } from './groqApi';
-import { NvidiaNimApiClient } from './nvidiaApi';
-import { OmnirouteApiClient } from './omnirouteApi';
-import { fetchOmnirouteModels, decodeOmnirouteModelId, resolveOmnirouteUpstreamModelId } from './omnirouteProvider';
-import {
-  MIMO_MODELS,
-  GLM_MODELS,
-  GROQ_MODELS,
-  NIM_MODELS,
-} from './models';
 import { SessionManager } from './sessionManager';
 import { ContextManager } from './contextManager';
+import { ChatProviderConfig } from './chatPanel';
 import { buildWebviewHtml } from './webview/htmlBuilder';
 import { WebviewToHostMessage, ChatMessage, TelemetryData, ChatAttachment } from './types/chat';
-
-export interface ModelInfo {
-  id: string;
-  name: string;
-}
-
-export interface ChatProviderConfig {
-  id: string;
-  displayName: string;
-  authManager: BaseAuthManager;
-  apiClientFactory: (apiKey: string, sessionId?: string) => GenericApiClient;
-  defaultModel: string;
-  models: ModelInfo[];
-  loadModels?: (apiKey: string) => Promise<ModelInfo[]>;
-  resolveModelId?: (id: string) => string;
-  allowZeroConfigApiKey?: boolean;
-}
 
 function getNonce(): string {
   let text = '';
@@ -44,106 +14,37 @@ function getNonce(): string {
   return text;
 }
 
-export function buildProviderConfigs(
-  xiaomiAuth: BaseAuthManager,
-  glmAuth: BaseAuthManager,
-  groqAuth: BaseAuthManager,
-  nvidiaAuth: BaseAuthManager,
-  omnirouteAuth: BaseAuthManager,
-): ChatProviderConfig[] {
-  return [
-    {
-      id: 'xiaomi', displayName: 'Xiaomi MiMo',
-      authManager: xiaomiAuth,
-      apiClientFactory: (k) => new MiMoApiClient(k),
-      defaultModel: 'mimo-v2.5-pro',
-      models: MIMO_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
-    },
-    {
-      id: 'glm', displayName: 'Z.ai GLM',
-      authManager: glmAuth,
-      apiClientFactory: (k) => new GlmApiClient(k),
-      defaultModel: 'glm-5',
-      models: GLM_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
-    },
-    {
-      id: 'groq', displayName: 'Groq',
-      authManager: groqAuth,
-      apiClientFactory: (k) => new GroqApiClient(k),
-      defaultModel: 'llama-3.3-70b-versatile',
-      models: GROQ_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
-    },
-    {
-      id: 'nvidia', displayName: 'NVIDIA NIM',
-      authManager: nvidiaAuth,
-      apiClientFactory: (k) => new NvidiaNimApiClient(k),
-      defaultModel: 'google/gemma-4-31b-it',
-      models: NIM_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
-    },
-    {
-      id: 'omniroute', displayName: 'Omniroute',
-      authManager: omnirouteAuth,
-      apiClientFactory: (k, sessionId) => new OmnirouteApiClient(k, { sessionId }),
-      defaultModel: 'auto/best-fast',
-      models: [],
-      loadModels: async (apiKey) => {
-        const live = await fetchOmnirouteModels(apiKey);
-        return live.map((m) => ({ id: decodeOmnirouteModelId(m.id), name: m.name ?? m.id }));
-      },
-      resolveModelId: resolveOmnirouteUpstreamModelId,
-      allowZeroConfigApiKey: true,
-    },
-  ];
-}
-
-let activePanel: ChatPanel | undefined;
-
-export class ChatPanel {
+export class ChatViewProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = 'copilot-amplify.chatView';
+  private view?: vscode.WebviewView;
   private cancellationTokenSource: vscode.CancellationTokenSource | null = null;
   private contextDisposable?: vscode.Disposable;
 
-  public static createOrShow(
-    extensionUri: vscode.Uri,
-    configs: ChatProviderConfig[],
-    sessionManager: SessionManager,
-    contextManager: ContextManager,
-  ): ChatPanel {
-    const column = vscode.window.activeTextEditor
-      ? vscode.window.activeTextEditor.viewColumn
-      : undefined;
-
-    if (activePanel) {
-      activePanel.panel.reveal(column);
-      return activePanel;
-    }
-
-    const panel = vscode.window.createWebviewPanel(
-      'copilotAmplifyChat',
-      'Copilot Amplify Chat',
-      column ?? vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-        localResourceRoots: [extensionUri],
-        retainContextWhenHidden: true,
-      },
-    );
-
-    activePanel = new ChatPanel(panel, extensionUri, configs, sessionManager, contextManager);
-    return activePanel;
-  }
-
-  private constructor(
-    public readonly panel: vscode.WebviewPanel,
+  constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly configs: ChatProviderConfig[],
     private readonly sessionManager: SessionManager,
     private readonly contextManager: ContextManager,
-  ) {
-    this.panel.webview.html = buildWebviewHtml(getNonce(), false);
-    this.panel.webview.onDidReceiveMessage((msg: WebviewToHostMessage) => this.onMessage(msg));
+  ) {}
+
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken,
+  ): void {
+    this.view = webviewView;
+
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this.extensionUri],
+    };
+
+    webviewView.webview.html = buildWebviewHtml(getNonce(), true);
+
+    webviewView.webview.onDidReceiveMessage((msg: WebviewToHostMessage) => this.onMessage(msg));
 
     this.contextDisposable = this.contextManager.registerListener((ctx) => {
-      void this.panel.webview.postMessage({
+      void webviewView.webview.postMessage({
         type: 'activeContextUpdate',
         fileName: ctx.fileName,
         selectionSnippet: ctx.selectionSnippet,
@@ -151,9 +52,8 @@ export class ChatPanel {
       });
     });
 
-    this.panel.onDidDispose(() => {
+    webviewView.onDidDispose(() => {
       this.contextDisposable?.dispose();
-      activePanel = undefined;
     });
 
     void this.refreshState();
@@ -164,6 +64,8 @@ export class ChatPanel {
   }
 
   private async refreshState(): Promise<void> {
+    if (!this.view) return;
+
     const session = this.sessionManager.getActiveSession();
     const cfg = this.getCurrentConfig(session.providerId);
     if (!cfg) return;
@@ -189,7 +91,7 @@ export class ChatPanel {
 
     const activeCtx = this.contextManager.getActiveContext();
 
-    await this.panel.webview.postMessage({
+    await this.view.webview.postMessage({
       type: 'state',
       providerId: cfg.id,
       models,
@@ -276,9 +178,13 @@ export class ChatPanel {
         await this.refreshState();
         break;
 
+      case 'popOutPanel':
+        await vscode.commands.executeCommand('copilot-amplify.openChat');
+        break;
+
       case 'requestActiveContext': {
         const ctx = this.contextManager.getActiveContext();
-        void this.panel.webview.postMessage({
+        void this.view?.webview.postMessage({
           type: 'activeContextUpdate',
           fileName: ctx.fileName,
           selectionSnippet: ctx.selectionSnippet,
@@ -313,12 +219,12 @@ export class ChatPanel {
   ): Promise<void> {
     const session = this.sessionManager.getActiveSession();
     const cfg = this.getCurrentConfig(session.providerId);
-    if (!cfg) return;
+    if (!cfg || !this.view) return;
 
     const storedApiKey = await cfg.authManager.getApiKey();
     const apiKey = storedApiKey || (cfg.allowZeroConfigApiKey ? 'omniroute' : undefined);
     if (!apiKey) {
-      void this.panel.webview.postMessage({
+      void this.view.webview.postMessage({
         type: 'error',
         message: `${cfg.displayName} API key is not configured. Click the dot status icon to set it.`,
       });
@@ -349,7 +255,7 @@ export class ChatPanel {
     };
 
     this.sessionManager.addMessageToActiveSession(userMsg);
-    void this.panel.webview.postMessage({ type: 'streamingStart', userMessage: userMsg });
+    void this.view.webview.postMessage({ type: 'streamingStart', userMessage: userMsg });
 
     const assistantMsgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const startTime = Date.now();
@@ -380,7 +286,7 @@ export class ChatPanel {
           if (deltaContent || deltaReasoning) {
             fullResponse += deltaContent;
             reasoningResponse += deltaReasoning;
-            void this.panel.webview.postMessage({
+            void this.view.webview.postMessage({
               type: 'chunk',
               messageId: assistantMsgId,
               text: deltaContent,
@@ -405,7 +311,7 @@ export class ChatPanel {
 
       this.sessionManager.addMessageToActiveSession(assistantMsg);
 
-      void this.panel.webview.postMessage({
+      void this.view.webview.postMessage({
         type: 'streamingEnd',
         messageId: assistantMsgId,
         sender: cfg.displayName,
@@ -413,7 +319,7 @@ export class ChatPanel {
       });
     } catch (err: unknown) {
       if (this.cancellationTokenSource?.token.isCancellationRequested) {
-        void this.panel.webview.postMessage({
+        void this.view.webview.postMessage({
           type: 'streamingEnd',
           messageId: assistantMsgId,
           sender: cfg.displayName,
@@ -421,17 +327,11 @@ export class ChatPanel {
         return;
       }
       const message = err instanceof Error ? err.message : String(err);
-      void this.panel.webview.postMessage({ type: 'error', message });
+      void this.view.webview.postMessage({ type: 'error', message });
     }
   }
-}
 
-export function openChatPanel(
-  context: vscode.ExtensionContext,
-  configs: ChatProviderConfig[],
-  sessionManager: SessionManager,
-  contextManager: ContextManager,
-): void {
-  ChatPanel.createOrShow(context.extensionUri, configs, sessionManager, contextManager);
+  public publicRefresh(): Promise<void> {
+    return this.refreshState();
+  }
 }
-
