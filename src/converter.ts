@@ -3,6 +3,8 @@ import { P, match } from 'ts-pattern';
 import * as vscode from 'vscode';
 import type { GenericContentPart, GenericMessage, GenericTool, GenericToolCall } from './baseApi';
 
+const textDecoder = new TextDecoder();
+
 interface PendingMessageState {
   contentParts: GenericContentPart[];
   toolCalls: GenericToolCall[];
@@ -96,7 +98,11 @@ function toGenericMessages(
           tool_call_id: value.callId,
         });
       })
-      .otherwise(() => { });
+      .otherwise((val) => {
+        if (val && typeof (val as any).value === 'string') {
+          pending.contentParts = appendTextContent(pending.contentParts, (val as any).value);
+        }
+      });
   }
 
   flushPending();
@@ -175,7 +181,7 @@ function flattenToolResultContent(
 
 function dataPartToText(part: vscode.LanguageModelDataPart): string {
   if (part.mimeType.startsWith('text/') || part.mimeType === 'application/json' || part.mimeType.endsWith('+json')) {
-    return new TextDecoder().decode(part.data);
+    return textDecoder.decode(part.data);
   }
 
   return `[${part.mimeType} data omitted]`;

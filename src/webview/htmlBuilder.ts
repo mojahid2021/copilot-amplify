@@ -984,6 +984,34 @@ export function buildWebviewHtml(nonce: string, isSidebar: boolean = true): stri
     };
 
     // Receive Messages from Host
+    let streamingRafId = null;
+
+    function updateStreamingBubble(msgId) {
+      if (streamingRafId) return;
+      streamingRafId = requestAnimationFrame(() => {
+        streamingRafId = null;
+        if (!currentSession || !currentSession.messages) return;
+        const last = currentSession.messages[currentSession.messages.length - 1];
+        if (!last || last.id !== msgId) return;
+
+        const rowEl = document.getElementById('msg-' + msgId);
+        if (!rowEl) {
+          renderMessages();
+          return;
+        }
+
+        const bubbleEl = rowEl.querySelector('.message-bubble');
+        if (bubbleEl) {
+          let reasoningHtml = '';
+          if (last.reasoningContent) {
+            reasoningHtml = '<details class="thinking-box" open><summary>🧠 Thinking Process...</summary><div class="thinking-content">' + escapeHtml(last.reasoningContent) + '</div></details>';
+          }
+          bubbleEl.innerHTML = reasoningHtml + (last.content ? formatMarkdown(last.content) : '');
+          chatContainerEl.scrollTop = chatContainerEl.scrollHeight;
+        }
+      });
+    }
+
     window.addEventListener('message', (e) => {
       const msg = e.data;
       switch (msg.type) {
@@ -1006,14 +1034,14 @@ export function buildWebviewHtml(nonce: string, isSidebar: boolean = true): stri
           break;
 
         case 'chunk': {
-          const last = currentSession.messages[currentSession.messages.length - 1];
-          if (last && last.isAssistantStreaming) {
+          let last = currentSession.messages[currentSession.messages.length - 1];
+          if (last && last.id === msg.messageId && last.isAssistantStreaming) {
             last.content += msg.text;
             if (msg.reasoningText) {
               last.reasoningContent = (last.reasoningContent || '') + msg.reasoningText;
             }
           } else {
-            currentSession.messages.push({
+            last = {
               id: msg.messageId,
               role: 'assistant',
               content: msg.text,
@@ -1021,14 +1049,19 @@ export function buildWebviewHtml(nonce: string, isSidebar: boolean = true): stri
               isAssistantStreaming: true,
               timestamp: Date.now(),
               reasoningContent: msg.reasoningText
-            });
+            };
+            currentSession.messages.push(last);
           }
-          renderMessages();
+          updateStreamingBubble(msg.messageId);
           break;
         }
 
         case 'streamingEnd': {
           streaming = false;
+          if (streamingRafId) {
+            cancelAnimationFrame(streamingRafId);
+            streamingRafId = null;
+          }
           const last2 = currentSession.messages[currentSession.messages.length - 1];
           if (last2 && last2.isAssistantStreaming) {
             last2.isAssistantStreaming = false;

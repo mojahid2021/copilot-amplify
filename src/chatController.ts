@@ -247,16 +247,34 @@ export class ChatController {
     // Add assistant message immediately so that partial content is saved if interrupted
     this.sessionManager.addMessageToActiveSession(assistantMsg);
 
+    let fullResponse = '';
+    let reasoningResponse = '';
+
     try {
       const systemContent = parameters?.systemPrompt || session.parameters.systemPrompt || 'You are a helpful AI assistant. Keep responses concise and informative.';
-      // Exclude the assistant message itself from the prompt context
+      
+      // Prune chat history to optimize AI context window, TTFT latency, and token consumption
+      const MAX_CONTEXT_MESSAGES = 30;
+      const MAX_CONTEXT_CHARS = 120000;
+
+      const priorMessages = session.messages.filter(m => m.id !== assistantMsgId);
+      let trimmedMessages = priorMessages.length > MAX_CONTEXT_MESSAGES 
+        ? priorMessages.slice(-MAX_CONTEXT_MESSAGES) 
+        : priorMessages;
+
+      let totalChars = trimmedMessages.reduce((sum, m) => sum + m.content.length, 0);
+      while (trimmedMessages.length > 2 && totalChars > MAX_CONTEXT_CHARS) {
+        const removed = trimmedMessages.shift();
+        if (removed) {
+          totalChars -= removed.content.length;
+        }
+      }
+
       const openAiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
         { role: 'system', content: systemContent },
-        ...session.messages.filter(m => m.id !== assistantMsgId).map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        ...trimmedMessages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
       ];
 
-      let fullResponse = '';
-      let reasoningResponse = '';
       const stream = client.streamChat(
         actualModel,
         openAiMessages,
@@ -275,12 +293,11 @@ export class ChatController {
             fullResponse += deltaContent;
             reasoningResponse += deltaReasoning;
 
-            // Stream state preservation
+            // Update in-memory message object for current stream view
             assistantMsg.content = fullResponse;
             if (reasoningResponse) {
               assistantMsg.reasoningContent = reasoningResponse;
             }
-            this.sessionManager.updateSession(session);
 
             void this.webview.postMessage({
               type: 'chunk',
@@ -296,6 +313,7 @@ export class ChatController {
       const telemetry: TelemetryData = { latencyMs };
 
       assistantMsg.telemetry = telemetry;
+      // Persist session state once stream completes successfully
       this.sessionManager.updateSession(session);
 
       void this.webview.postMessage({
@@ -305,6 +323,12 @@ export class ChatController {
         telemetry,
       });
     } catch (err: unknown) {
+      assistantMsg.content = fullResponse;
+      if (reasoningResponse) {
+        assistantMsg.reasoningContent = reasoningResponse;
+      }
+      this.sessionManager.updateSession(session);
+
       if (this.cancellationTokenSource?.token.isCancellationRequested) {
         void this.webview.postMessage({
           type: 'streamingEnd',

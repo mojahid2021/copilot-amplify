@@ -195,22 +195,42 @@ class NvidiaApiClient extends ProviderApiClient {
   }
 }
 
+const apiClientCache = new Map<string, GenericApiClient>();
+
+export function clearApiClientCache(): void {
+  apiClientCache.clear();
+}
+
 export function createApiClient(providerId: string, apiKey: string, sessionId?: string): GenericApiClient {
+  const cacheKey = `${providerId}:${apiKey}:${sessionId || ''}`;
+  let client = apiClientCache.get(cacheKey);
+  if (client) {
+    return client;
+  }
+
   switch (providerId) {
     case 'xiaomi':
-      return new XiaomiApiClient(apiKey);
+      client = new XiaomiApiClient(apiKey);
+      break;
     case 'glm':
-      return new GlmApiClient(apiKey);
+      client = new GlmApiClient(apiKey);
+      break;
     case 'groq':
-      return new GroqApiClient(apiKey);
+      client = new GroqApiClient(apiKey);
+      break;
     case 'nvidia':
-      return new NvidiaApiClient(apiKey);
+      client = new NvidiaApiClient(apiKey);
+      break;
     case 'omniroute':
-      return new OmnirouteApiClient(apiKey, { sessionId });
+      client = new OmnirouteApiClient(apiKey, { sessionId });
+      break;
     default:
-        throw new Error(`Unknown provider API client: ${providerId}`);
-    }
+      throw new Error(`Unknown provider API client: ${providerId}`);
   }
+
+  apiClientCache.set(cacheKey, client);
+  return client;
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Chat Provider Factory

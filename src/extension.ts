@@ -8,7 +8,7 @@ import { openChatPanel, buildProviderConfigs } from './chatPanel';
 import { SessionManager } from './sessionManager';
 import { ContextManager } from './contextManager';
 import { ChatViewProvider } from './chatViewProvider';
-import { PROVIDERS, createAuthManager, createApiClient, createConfigurableChatProvider } from './providers';
+import { PROVIDERS, createAuthManager, createApiClient, createConfigurableChatProvider, clearApiClientCache } from './providers';
 
 const PROVIDER_VENDORS = {
   xiaomi:    'LuneCode.xiaomi',
@@ -162,6 +162,7 @@ export function activate(context: vscode.ExtensionContext): void {
         'Set API Key':    async () => {
           try {
             await authManager.promptForApiKey();
+            clearApiClientCache();
             if (isOmniroute) omnirouteChatProvider.invalidateModelCache();
             treeDataProvider.refresh();
           } catch (err) { }
@@ -169,6 +170,7 @@ export function activate(context: vscode.ExtensionContext): void {
         'Clear API Key':  async () => {
           try {
             await authManager.deleteApiKey();
+            clearApiClientCache();
             if (isOmniroute) omnirouteChatProvider.invalidateModelCache();
             treeDataProvider.refresh();
           } catch (err) { }
@@ -192,6 +194,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-amplify.refresh', () => {
+      clearApiClientCache();
       omnirouteChatProvider.invalidateModelCache();
       treeDataProvider.refresh();
       void chatViewProvider.publicRefresh();

@@ -9,8 +9,9 @@ export interface ThinkingState {
 }
 
 function getPartialSuffixLength(buffer: string, marker: string): number {
-  for (let i = Math.min(buffer.length, marker.length - 1); i > 0; i--) {
-    if (buffer.endsWith(marker.slice(0, i))) {
+  const maxCheck = Math.min(buffer.length, marker.length - 1);
+  for (let i = maxCheck; i > 0; i--) {
+    if (marker.startsWith(buffer.slice(-i))) {
       return i;
     }
   }
@@ -25,8 +26,7 @@ export function processThinkingContent(content: string, state: ThinkingState): {
   if (
     !state.insideThinking
     && state.buffer.length === 0
-    && !content.includes(THINK_OPEN)
-    && !content.includes(THINK_CLOSE)
+    && !content.includes('<')
   ) {
     return { output: content, state };
   }

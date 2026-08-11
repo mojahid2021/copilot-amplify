@@ -1,3 +1,5 @@
+import http from 'http';
+import https from 'https';
 import OpenAI from 'openai';
 import type {
   ChatCompletionChunk,
@@ -10,6 +12,15 @@ import type {
 } from 'openai/resources/chat/completions/completions';
 import { match } from 'ts-pattern';
 import type * as vscode from 'vscode';
+
+const defaultHttpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 64 });
+const defaultHttpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 64 });
+
+const customFetch = (url: string | URL | unknown, init?: RequestInit): Promise<Response> => {
+  const isHttp = typeof url === 'string' ? url.startsWith('http:') : (url instanceof URL && url.protocol === 'http:');
+  const agent = isHttp ? defaultHttpAgent : defaultHttpsAgent;
+  return fetch(url as any, { ...init, agent, keepalive: true } as any);
+};
 
 export interface GenericMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -94,6 +105,7 @@ export class GenericApiClient {
     this.client = new OpenAI({
       apiKey,
       baseURL,
+      fetch: customFetch,
     });
   }
 
@@ -102,10 +114,14 @@ export class GenericApiClient {
       return content;
     }
 
-    return content
-      .filter((part): part is GenericTextContentPart => part.type === 'text')
-      .map((part) => part.text)
-      .join('');
+    let text = '';
+    for (let i = 0; i < content.length; i++) {
+      const part = content[i];
+      if (part.type === 'text') {
+        text += part.text;
+      }
+    }
+    return text;
   }
 
   private toOpenAiContentParts(parts: GenericContentPart[]): ChatCompletionContentPart[] {

@@ -59,14 +59,6 @@ function getNumberModelOption(
 }
 
 function estimateDataPartSize(part: vscode.LanguageModelDataPart): number {
-  if (
-    part.mimeType.startsWith('text/')
-    || part.mimeType === 'application/json'
-    || part.mimeType.endsWith('+json')
-  ) {
-    return new TextDecoder().decode(part.data).length;
-  }
-
   return part.data.byteLength;
 }
 
@@ -291,6 +283,18 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     let structuredReasoningActive = false;
     let hasReportedAnyPart = false;
 
+    // Micro-buffer text chunks to optimize IPC throughput for high-speed models in VS Code
+    let pendingText = '';
+    let lastFlushTime = Date.now();
+
+    const flushText = () => {
+      if (pendingText.length > 0) {
+        progress.report(new vscode.LanguageModelTextPart(pendingText));
+        pendingText = '';
+        lastFlushTime = Date.now();
+      }
+    };
+
     const stream = client.streamChat(
       this.mapModelId(model.id),
       convertMessages(messages, model.capabilities.imageInput === true),
@@ -312,7 +316,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
 
     for await (const chunk of stream) {
       if (token.isCancellationRequested) {
-        return;
+        break;
       }
 
       if (!chunk.choices || !Array.isArray(chunk.choices)) {
@@ -331,6 +335,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
           : undefined;
 
         if (reasoning) {
+          flushText();
           this.reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
           structuredReasoningActive = true;
           hasReportedAnyPart = true;
@@ -342,15 +347,25 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
 
         if (content) {
           if (structuredReasoningActive) {
+            flushText();
             this.closeStructuredReasoning(progress);
             structuredReasoningActive = false;
           }
-          thinkingState = this.reportTextDelta(content, thinkingState, progress);
+          const result = processThinkingContent(content, thinkingState);
+          thinkingState = result.state;
+          if (result.output) {
+            pendingText += result.output;
+            const now = Date.now();
+            if (pendingText.length >= 32 || now - lastFlushTime >= 16) {
+              flushText();
+            }
+          }
           hasReportedAnyPart = true;
         }
 
         this.collectToolCalls(choice.delta.tool_calls, toolCallBuilders);
         if (choice.finish_reason === 'tool_calls') {
+          flushText();
           if (structuredReasoningActive) {
             this.closeStructuredReasoning(progress);
             structuredReasoningActive = false;
@@ -360,6 +375,12 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
         }
       }
     }
+
+    if (thinkingState.buffer.length > 0) {
+      pendingText += thinkingState.buffer;
+      thinkingState.buffer = '';
+    }
+    flushText();
 
     if (structuredReasoningActive) {
       this.closeStructuredReasoning(progress);

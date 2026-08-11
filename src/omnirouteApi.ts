@@ -103,6 +103,7 @@ export function buildOmnirouteRequestHeaders(
   const cfg = getOmnirouteConfig();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Connection': 'keep-alive',
   };
 
   if (cfg.noCache) {
@@ -276,6 +277,7 @@ export class OmnirouteApiClient extends GenericApiClient {
         headers,
         body: JSON.stringify(this.buildBody(model, messages, options, true)),
         signal: abortController.signal,
+        keepalive: true,
       });
 
       if (getOmnirouteConfig().logTelemetry) {
