@@ -1,106 +1,56 @@
 import * as vscode from 'vscode';
 import type { BaseAuthManager } from './baseAuth';
 import type { GenericApiClient } from './baseApi';
-import { MiMoApiClient } from './api';
-import { GlmApiClient } from './glmApi';
-import { GroqApiClient } from './groqApi';
-import { NvidiaNimApiClient } from './nvidiaApi';
 import { OmnirouteApiClient } from './omnirouteApi';
 import { fetchOmnirouteModels, decodeOmnirouteModelId, resolveOmnirouteUpstreamModelId } from './omnirouteProvider';
-import {
-  MIMO_MODELS,
-  GLM_MODELS,
-  GROQ_MODELS,
-  NIM_MODELS,
-} from './models';
+import { PROVIDERS, createApiClient } from './providers';
 import { SessionManager } from './sessionManager';
 import { ContextManager } from './contextManager';
-import { buildWebviewHtml } from './webview/htmlBuilder';
+import { buildWebviewHtml, getNonce } from './webview/htmlBuilder';
 import { WebviewToHostMessage, ChatMessage, TelemetryData, ChatAttachment } from './types/chat';
+import { ChatController, ChatProviderConfig, ModelInfo } from './chatController';
 
-export interface ModelInfo {
-  id: string;
-  name: string;
-}
+export { ChatProviderConfig, ModelInfo };
 
-export interface ChatProviderConfig {
-  id: string;
-  displayName: string;
-  authManager: BaseAuthManager;
-  apiClientFactory: (apiKey: string, sessionId?: string) => GenericApiClient;
-  defaultModel: string;
-  models: ModelInfo[];
-  loadModels?: (apiKey: string) => Promise<ModelInfo[]>;
-  resolveModelId?: (id: string) => string;
-  allowZeroConfigApiKey?: boolean;
-}
-
-function getNonce(): string {
-  let text = '';
-  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  for (let i = 0; i < 32; i++) {
-    text += possible.charAt(Math.floor(Math.random() * possible.length));
+export function buildProviderConfigs(authManagers: Record<string, BaseAuthManager>): ChatProviderConfig[] {
+  const configs: ChatProviderConfig[] = [];
+  
+  for (const [id, cfg] of Object.entries(PROVIDERS)) {
+    if (id === 'omniroute') continue;
+    configs.push({
+      id: cfg.id,
+      displayName: cfg.displayName,
+      authManager: authManagers[id],
+      apiClientFactory: (k) => createApiClient(id, k),
+      defaultModel: cfg.chatProviderOptions?.models[0]?.id || '',
+      models: cfg.chatProviderOptions?.models.map((m) => ({ id: m.id, name: m.name ?? m.id })) || [],
+    });
   }
-  return text;
-}
 
-export function buildProviderConfigs(
-  xiaomiAuth: BaseAuthManager,
-  glmAuth: BaseAuthManager,
-  groqAuth: BaseAuthManager,
-  nvidiaAuth: BaseAuthManager,
-  omnirouteAuth: BaseAuthManager,
-): ChatProviderConfig[] {
-  return [
-    {
-      id: 'xiaomi', displayName: 'Xiaomi MiMo',
-      authManager: xiaomiAuth,
-      apiClientFactory: (k) => new MiMoApiClient(k),
-      defaultModel: 'mimo-v2.5-pro',
-      models: MIMO_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
+  // Add omniroute explicitly with dynamic models
+  configs.push({
+    id: 'omniroute',
+    displayName: 'Omniroute',
+    authManager: authManagers['omniroute'],
+    apiClientFactory: (k, sessionId) => new OmnirouteApiClient(k, { sessionId }),
+    defaultModel: 'auto/best-fast',
+    models: [],
+    loadModels: async (apiKey) => {
+      const live = await fetchOmnirouteModels(apiKey);
+      return live.map((m) => ({ id: decodeOmnirouteModelId(m.id), name: m.name ?? m.id }));
     },
-    {
-      id: 'glm', displayName: 'Z.ai GLM',
-      authManager: glmAuth,
-      apiClientFactory: (k) => new GlmApiClient(k),
-      defaultModel: 'glm-5',
-      models: GLM_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
-    },
-    {
-      id: 'groq', displayName: 'Groq',
-      authManager: groqAuth,
-      apiClientFactory: (k) => new GroqApiClient(k),
-      defaultModel: 'llama-3.3-70b-versatile',
-      models: GROQ_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
-    },
-    {
-      id: 'nvidia', displayName: 'NVIDIA NIM',
-      authManager: nvidiaAuth,
-      apiClientFactory: (k) => new NvidiaNimApiClient(k),
-      defaultModel: 'google/gemma-4-31b-it',
-      models: NIM_MODELS.map((m) => ({ id: m.id, name: m.name ?? m.id })),
-    },
-    {
-      id: 'omniroute', displayName: 'Omniroute',
-      authManager: omnirouteAuth,
-      apiClientFactory: (k, sessionId) => new OmnirouteApiClient(k, { sessionId }),
-      defaultModel: 'auto/best-fast',
-      models: [],
-      loadModels: async (apiKey) => {
-        const live = await fetchOmnirouteModels(apiKey);
-        return live.map((m) => ({ id: decodeOmnirouteModelId(m.id), name: m.name ?? m.id }));
-      },
-      resolveModelId: resolveOmnirouteUpstreamModelId,
-      allowZeroConfigApiKey: true,
-    },
-  ];
+    resolveModelId: resolveOmnirouteUpstreamModelId,
+    allowZeroConfigApiKey: true,
+  });
+
+  return configs;
 }
 
 let activePanel: ChatPanel | undefined;
 
 export class ChatPanel {
-  private cancellationTokenSource: vscode.CancellationTokenSource | null = null;
   private contextDisposable?: vscode.Disposable;
+  private controller: ChatController;
 
   public static createOrShow(
     extensionUri: vscode.Uri,
@@ -139,16 +89,13 @@ export class ChatPanel {
     private readonly sessionManager: SessionManager,
     private readonly contextManager: ContextManager,
   ) {
+    this.controller = new ChatController(panel.webview, configs, sessionManager, contextManager);
+
     this.panel.webview.html = buildWebviewHtml(getNonce(), false);
-    this.panel.webview.onDidReceiveMessage((msg: WebviewToHostMessage) => this.onMessage(msg));
+    this.panel.webview.onDidReceiveMessage((msg: WebviewToHostMessage) => this.controller.handleMessage(msg));
 
     this.contextDisposable = this.contextManager.registerListener((ctx) => {
-      void this.panel.webview.postMessage({
-        type: 'activeContextUpdate',
-        fileName: ctx.fileName,
-        selectionSnippet: ctx.selectionSnippet,
-        hasSelection: ctx.hasSelection,
-      });
+      this.controller.notifyContextUpdate(ctx);
     });
 
     this.panel.onDidDispose(() => {
@@ -156,273 +103,11 @@ export class ChatPanel {
       activePanel = undefined;
     });
 
-    void this.refreshState();
+    void this.controller.refreshState();
   }
 
-  private getCurrentConfig(providerId: string): ChatProviderConfig | undefined {
-    return this.configs.find((c) => c.id === providerId);
-  }
-
-  private async refreshState(): Promise<void> {
-    const session = this.sessionManager.getActiveSession();
-    const cfg = this.getCurrentConfig(session.providerId);
-    if (!cfg) return;
-
-    const storedApiKey = await cfg.authManager.getApiKey();
-    const effectiveApiKey = storedApiKey || (cfg.allowZeroConfigApiKey ? 'omniroute' : undefined);
-    const hasKey = cfg.allowZeroConfigApiKey || Boolean(storedApiKey);
-
-    let models = cfg.models;
-    if (cfg.loadModels && effectiveApiKey) {
-      try {
-        models = await cfg.loadModels(effectiveApiKey);
-        if (models.length > 0 && !models.some((m) => m.id === session.modelId)) {
-          session.modelId = cfg.defaultModel && models.some((m) => m.id === cfg.defaultModel)
-            ? cfg.defaultModel
-            : models[0].id;
-          this.sessionManager.updateSession(session);
-        }
-      } catch (err) {
-        console.warn(`[${cfg.displayName}] live model load failed:`, err);
-      }
-    }
-
-    const activeCtx = this.contextManager.getActiveContext();
-
-    await this.panel.webview.postMessage({
-      type: 'state',
-      providerId: cfg.id,
-      models,
-      defaultModelId: session.modelId || cfg.defaultModel,
-      apiKeyConfigured: hasKey,
-      displayName: cfg.displayName,
-      currentSession: session,
-      sessionsList: this.sessionManager.getSessionsList(),
-      activeContext: {
-        fileName: activeCtx.fileName,
-        selectionSnippet: activeCtx.selectionSnippet,
-        hasSelection: activeCtx.hasSelection,
-      },
-    });
-  }
-
-  private async onMessage(msg: WebviewToHostMessage): Promise<void> {
-    switch (msg.type) {
-      case 'changeProvider': {
-        const session = this.sessionManager.getActiveSession();
-        const cfg = this.getCurrentConfig(msg.providerId);
-        if (cfg) {
-          this.sessionManager.updateActiveSessionProviderAndModel(cfg.id, cfg.defaultModel);
-        }
-        await this.refreshState();
-        break;
-      }
-
-      case 'changeModel': {
-        const session = this.sessionManager.getActiveSession();
-        session.modelId = msg.modelId;
-        this.sessionManager.updateSession(session);
-        break;
-      }
-
-      case 'sendMessage':
-        await this.sendMessage(msg.text, msg.modelId, msg.attachments, msg.parameters);
-        break;
-
-      case 'cancelStream':
-        this.cancellationTokenSource?.cancel();
-        break;
-
-      case 'newSession': {
-        const session = this.sessionManager.getActiveSession();
-        this.sessionManager.createSession(session.providerId, session.modelId);
-        await this.refreshState();
-        break;
-      }
-
-      case 'loadSession':
-        this.sessionManager.setActiveSession(msg.sessionId);
-        await this.refreshState();
-        break;
-
-      case 'deleteSession':
-        this.sessionManager.deleteSession(msg.sessionId);
-        await this.refreshState();
-        break;
-
-      case 'renameSession':
-        this.sessionManager.renameSession(msg.sessionId, msg.title);
-        await this.refreshState();
-        break;
-
-      case 'updateParameters':
-        this.sessionManager.updateActiveSessionParameters(msg.parameters);
-        break;
-
-      case 'copyToClipboard':
-        await vscode.env.clipboard.writeText(msg.text);
-        break;
-
-      case 'insertAtCursor':
-        await this.contextManager.insertAtCursor(msg.text);
-        break;
-
-      case 'applyToActiveFile':
-        await this.contextManager.applyToActiveFile(msg.text);
-        break;
-
-      case 'openKeyInput':
-        await vscode.commands.executeCommand('copilot-amplify.setApiKey', msg.providerId);
-        await this.refreshState();
-        break;
-
-      case 'requestActiveContext': {
-        const ctx = this.contextManager.getActiveContext();
-        void this.panel.webview.postMessage({
-          type: 'activeContextUpdate',
-          fileName: ctx.fileName,
-          selectionSnippet: ctx.selectionSnippet,
-          hasSelection: ctx.hasSelection,
-        });
-        break;
-      }
-
-      case 'exportChat': {
-        const session = this.sessionManager.getActiveSession();
-        let content = '';
-        if (msg.format === 'json') {
-          content = JSON.stringify(session, null, 2);
-        } else {
-          content = `# ${session.title}\n\n`;
-          for (const m of session.messages) {
-            content += `### ${m.sender} (${new Date(m.timestamp).toLocaleTimeString()})\n\n${m.content}\n\n---\n\n`;
-          }
-        }
-        const doc = await vscode.workspace.openTextDocument({ content, language: msg.format === 'json' ? 'json' : 'markdown' });
-        await vscode.window.showTextDocument(doc);
-        break;
-      }
-    }
-  }
-
-  private async sendMessage(
-    text: string,
-    modelId: string,
-    attachments?: ChatAttachment[],
-    parameters?: any,
-  ): Promise<void> {
-    const session = this.sessionManager.getActiveSession();
-    const cfg = this.getCurrentConfig(session.providerId);
-    if (!cfg) return;
-
-    const storedApiKey = await cfg.authManager.getApiKey();
-    const apiKey = storedApiKey || (cfg.allowZeroConfigApiKey ? 'omniroute' : undefined);
-    if (!apiKey) {
-      void this.panel.webview.postMessage({
-        type: 'error',
-        message: `${cfg.displayName} API key is not configured. Click the dot status icon to set it.`,
-      });
-      return;
-    }
-
-    const rawModel = modelId || session.modelId || cfg.defaultModel;
-    const actualModel = cfg.resolveModelId ? cfg.resolveModelId(rawModel) : rawModel;
-    this.cancellationTokenSource = new vscode.CancellationTokenSource();
-    const client = cfg.apiClientFactory(apiKey, session.id);
-
-    let fullPromptContent = text;
-    if (attachments && attachments.length > 0) {
-      for (const att of attachments) {
-        if (att.type === 'code_selection') {
-          fullPromptContent += `\n\n[Attached Selection: ${att.name}]\n\`\`\`\n${att.content}\n\`\`\``;
-        }
-      }
-    }
-
-    const userMsg: ChatMessage = {
-      id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      role: 'user',
-      content: fullPromptContent,
-      sender: 'You',
-      timestamp: Date.now(),
-      attachments,
-    };
-
-    this.sessionManager.addMessageToActiveSession(userMsg);
-    void this.panel.webview.postMessage({ type: 'streamingStart', userMessage: userMsg });
-
-    const assistantMsgId = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const startTime = Date.now();
-
-    try {
-      const systemContent = parameters?.systemPrompt || session.parameters.systemPrompt || 'You are a helpful AI assistant. Keep responses concise and informative.';
-      const openAiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-        { role: 'system', content: systemContent },
-        ...session.messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
-      ];
-
-      let fullResponse = '';
-      let reasoningResponse = '';
-      const stream = client.streamChat(
-        actualModel,
-        openAiMessages,
-        {
-          maxTokens: parameters?.maxTokens || 8192,
-          temperature: parameters?.temperature ?? session.parameters.temperature ?? 0.7,
-        },
-        this.cancellationTokenSource.token,
-      );
-
-      for await (const chunk of stream) {
-        for (const choice of chunk.choices) {
-          const deltaContent = choice.delta?.content || '';
-          const deltaReasoning = (choice.delta as any)?.reasoning_content || '';
-          if (deltaContent || deltaReasoning) {
-            fullResponse += deltaContent;
-            reasoningResponse += deltaReasoning;
-            void this.panel.webview.postMessage({
-              type: 'chunk',
-              messageId: assistantMsgId,
-              text: deltaContent,
-              reasoningText: deltaReasoning,
-            });
-          }
-        }
-      }
-
-      const latencyMs = Date.now() - startTime;
-      const telemetry: TelemetryData = { latencyMs };
-
-      const assistantMsg: ChatMessage = {
-        id: assistantMsgId,
-        role: 'assistant',
-        content: fullResponse,
-        sender: cfg.displayName,
-        timestamp: Date.now(),
-        reasoningContent: reasoningResponse || undefined,
-        telemetry,
-      };
-
-      this.sessionManager.addMessageToActiveSession(assistantMsg);
-
-      void this.panel.webview.postMessage({
-        type: 'streamingEnd',
-        messageId: assistantMsgId,
-        sender: cfg.displayName,
-        telemetry,
-      });
-    } catch (err: unknown) {
-      if (this.cancellationTokenSource?.token.isCancellationRequested) {
-        void this.panel.webview.postMessage({
-          type: 'streamingEnd',
-          messageId: assistantMsgId,
-          sender: cfg.displayName,
-        });
-        return;
-      }
-      const message = err instanceof Error ? err.message : String(err);
-      void this.panel.webview.postMessage({ type: 'error', message });
-    }
+  public publicRefresh(): Promise<void> {
+    return this.controller.refreshState();
   }
 }
 
@@ -434,4 +119,3 @@ export function openChatPanel(
 ): void {
   ChatPanel.createOrShow(context.extensionUri, configs, sessionManager, contextManager);
 }
-

@@ -12,10 +12,16 @@ export class SessionManager {
     this.loadFromStorage();
   }
 
+  private saveDebounceTimer?: NodeJS.Timeout;
+
   private loadFromStorage(): void {
     const rawSessions = this.context.workspaceState.get<ChatSession[]>(SESSIONS_STORAGE_KEY, []);
     this.sessions.clear();
     for (const session of rawSessions) {
+      if (session.messages.length > 200) {
+        // Cap message history to prevent unbounded growth
+        session.messages = session.messages.slice(-200);
+      }
       this.sessions.set(session.id, session);
     }
 
@@ -31,9 +37,14 @@ export class SessionManager {
   }
 
   private saveToStorage(): void {
-    const sessionList = Array.from(this.sessions.values());
-    void this.context.workspaceState.update(SESSIONS_STORAGE_KEY, sessionList);
-    void this.context.workspaceState.update(ACTIVE_SESSION_ID_KEY, this.activeSessionId);
+    if (this.saveDebounceTimer) {
+      clearTimeout(this.saveDebounceTimer);
+    }
+    this.saveDebounceTimer = setTimeout(() => {
+      const sessionList = Array.from(this.sessions.values());
+      void this.context.workspaceState.update(SESSIONS_STORAGE_KEY, sessionList);
+      void this.context.workspaceState.update(ACTIVE_SESSION_ID_KEY, this.activeSessionId);
+    }, 1000);
   }
 
   public createSession(providerId: string, modelId: string, title?: string): ChatSession {

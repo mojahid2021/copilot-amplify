@@ -83,7 +83,7 @@ function toGenericMessages(
             type: 'function' as const,
             function: {
               name: value.name,
-              arguments: JSON.stringify(value.input),
+              arguments: typeof value.input === 'string' ? value.input : JSON.stringify(value.input ?? {}),
             },
           },
         ];

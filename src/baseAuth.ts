@@ -24,18 +24,6 @@ export class BaseAuthManager {
       }
     }
 
-    // Fall back to VS Code workspace configuration settings
-    const configVal = vscode.workspace.getConfiguration().get<string>(this.secretKey);
-    if (configVal && configVal.trim().length > 0) {
-      return configVal.trim();
-    }
-    if (this.legacySecretKey) {
-      const legacyConfigVal = vscode.workspace.getConfiguration().get<string>(this.legacySecretKey);
-      if (legacyConfigVal && legacyConfigVal.trim().length > 0) {
-        return legacyConfigVal.trim();
-      }
-    }
-
     return undefined;
   }
 

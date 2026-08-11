@@ -66,11 +66,7 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   constructor(
-    private readonly xiaomiAuth: BaseAuthManager,
-    private readonly glmAuth:    BaseAuthManager,
-    private readonly groqAuth:   BaseAuthManager,
-    private readonly nvidiaAuth: BaseAuthManager,
-    private readonly omnirouteAuth: BaseAuthManager,
+    private readonly authManagers: Record<string, BaseAuthManager>
   ) {}
 
   refresh(): void {
@@ -113,11 +109,11 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
 
   private async getProviderItems(): Promise<ProviderTreeItem[]> {
     const [k1, k2, k3, k4, k5] = await Promise.all([
-      this.xiaomiAuth.getApiKey(),
-      this.glmAuth.getApiKey(),
-      this.groqAuth.getApiKey(),
-      this.nvidiaAuth.getApiKey(),
-      this.omnirouteAuth.getApiKey(),
+      this.authManagers['xiaomi'].getApiKey(),
+      this.authManagers['glm'].getApiKey(),
+      this.authManagers['groq'].getApiKey(),
+      this.authManagers['nvidia'].getApiKey(),
+      this.authManagers['omniroute'].getApiKey(),
     ]);
     return [
       this.mkProviderItem('xiaomi',    Boolean(k1)),
@@ -204,7 +200,7 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
       case 'nvidia':    return NIM_MODELS.map((m) => ({ id: m.id, name: m.name }));
       case 'omniroute': {
         try {
-          const apiKey = (await this.omnirouteAuth.getApiKey()) || 'omniroute';
+          const apiKey = (await this.authManagers['omniroute'].getApiKey()) || 'omniroute';
           const live = await fetchOmnirouteModels(apiKey);
           return live.map((m) => ({
             id: decodeOmnirouteModelId(m.id),

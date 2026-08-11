@@ -3,7 +3,7 @@ import { BaseChatProvider } from './baseProvider';
 import type { ThinkingOption } from './baseApi';
 import { CHAT_BASE_URL, OmnirouteApiClient } from './omnirouteApi';
 import { getOmnirouteBaseUrl, getOmnirouteConfig, onDidChangeOmnirouteConfig } from './omnirouteConfig';
-import { registerOmnirouteModelCapabilities } from './omnirouteModelRegistry';
+import { registerOmnirouteModelCapabilities, clearOmnirouteModelCapabilities } from './omnirouteModelRegistry';
 import type { BaseAuthManager } from './baseAuth';
 
 interface OmnirouteModelCapabilities {
@@ -41,11 +41,13 @@ interface OmnirouteModelsResponse {
 const NO_THINKING_PREFIX = 'claude-3-omniroute-no-thinking/';
 
 function isNoThinkingVariant(id: string): boolean {
-  return id.startsWith(NO_THINKING_PREFIX);
+  const norm = id.replaceAll('__', '/');
+  return norm.startsWith(NO_THINKING_PREFIX);
 }
 
 function stripNoThinkingPrefix(id: string): string {
-  return isNoThinkingVariant(id) ? id.slice(NO_THINKING_PREFIX.length) : id;
+  const norm = id.replaceAll('__', '/');
+  return isNoThinkingVariant(norm) ? norm.slice(NO_THINKING_PREFIX.length) : id;
 }
 
 function getModelsEndpoint(): string {
@@ -109,7 +111,10 @@ function supportsVision(model: OmnirouteModelRaw): boolean {
 }
 
 function supportsTools(model: OmnirouteModelRaw): boolean {
-  return model.capabilities?.tool_calling === true;
+  if (typeof model.capabilities?.tool_calling === 'boolean') {
+    return model.capabilities.tool_calling;
+  }
+  return true;
 }
 
 export function rawModelSupportsThinking(model: OmnirouteModelRaw, id: string): boolean {
@@ -290,6 +295,7 @@ export class OmnirouteChatProvider extends BaseChatProvider {
     this.modelCache = undefined;
     this.modelCacheExpiresAt = 0;
     this.inflightFetch = undefined;
+    clearOmnirouteModelCapabilities();
     void this.warmup();
   }
 

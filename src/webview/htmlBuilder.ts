@@ -1,3 +1,9 @@
+import * as crypto from 'crypto';
+
+export function getNonce(): string {
+  return crypto.randomBytes(16).toString('hex');
+}
+
 export function buildWebviewHtml(nonce: string, isSidebar: boolean = true): string {
   return `<!DOCTYPE html>
 <html lang="en">

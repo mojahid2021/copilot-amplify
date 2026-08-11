@@ -11,22 +11,32 @@ export interface ActiveContextInfo {
 }
 
 export class ContextManager {
-  private listeners: Array<(ctx: ActiveContextInfo) => void> = [];
+  private listeners: Set<(ctx: ActiveContextInfo) => void> = new Set();
   private disposables: vscode.Disposable[] = [];
+  private selectionDebounceTimer?: NodeJS.Timeout;
 
   constructor() {
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.notifyListeners()),
-      vscode.window.onDidChangeTextEditorSelection(() => this.notifyListeners()),
+      vscode.window.onDidChangeTextEditorSelection(() => this.notifyListenersDebounced()),
     );
   }
 
   public registerListener(callback: (ctx: ActiveContextInfo) => void): vscode.Disposable {
-    this.listeners.push(callback);
+    this.listeners.add(callback);
     callback(this.getActiveContext());
     return new vscode.Disposable(() => {
-      this.listeners = this.listeners.filter((l) => l !== callback);
+      this.listeners.delete(callback);
     });
+  }
+
+  private notifyListenersDebounced(): void {
+    if (this.selectionDebounceTimer) {
+      clearTimeout(this.selectionDebounceTimer);
+    }
+    this.selectionDebounceTimer = setTimeout(() => {
+      this.notifyListeners();
+    }, 150);
   }
 
   private notifyListeners(): void {
@@ -48,7 +58,11 @@ export class ContextManager {
     const filePath = doc.fileName;
 
     if (!selection.isEmpty) {
-      const selectedText = doc.getText(selection);
+      let selectedText = doc.getText(selection);
+      // Cap selection size to 50KB to avoid heavy IPC serialization and UI freezing
+      if (selectedText.length > 50000) {
+        selectedText = selectedText.slice(0, 50000) + '\n... [Content Truncated]';
+      }
       return {
         fileName,
         filePath,
@@ -115,6 +129,9 @@ export class ContextManager {
   }
 
   public dispose(): void {
+    if (this.selectionDebounceTimer) {
+      clearTimeout(this.selectionDebounceTimer);
+    }
     for (const d of this.disposables) {
       d.dispose();
     }

@@ -1,3 +1,4 @@
+// Moved ConfigurableChatProvider to bottom
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions/completions';
 import * as vscode from 'vscode';
 import { ApiError, GenericApiClient, type ReasoningEffort, type ThinkingOption } from './baseApi';
@@ -95,11 +96,11 @@ function estimateToolResultSize(
   return total;
 }
 
-export abstract class BaseChatProvider implements vscode.LanguageModelChatProvider {
-  protected abstract get baseURL(): string;
-  protected abstract get providerDisplayName(): string;
-  protected abstract get errorMessages(): Record<number, string>;
-  protected abstract get models(): vscode.LanguageModelChatInformation[];
+export abstract class BaseChatProvider implements vscode.LanguageModelChatProvider, vscode.Disposable {
+  protected abstract readonly baseURL: string;
+  protected abstract readonly providerDisplayName: string;
+  protected abstract readonly errorMessages: Record<number, string>;
+  protected abstract readonly models: vscode.LanguageModelChatInformation[];
 
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeLanguageModelChatInformation: vscode.Event<void> = this.changeEmitter.event;
@@ -167,11 +168,22 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     return 'high';
   }
 
+  private readonly _disposables: vscode.Disposable[] = [];
+
   constructor(protected readonly authManager: BaseAuthManager) {
-    this.authManager.onDidChangeApiKey(() => {
-      this.clientCache.clear();
-      this.fireModelInformationChanged();
-    });
+    this._disposables.push(
+      this.changeEmitter,
+      this.authManager.onDidChangeApiKey(() => {
+        this.clientCache.clear();
+        this.fireModelInformationChanged();
+      })
+    );
+  }
+
+  public dispose(): void {
+    for (const d of this._disposables) {
+      d.dispose();
+    }
   }
 
   protected getApiClient(apiKey: string): GenericApiClient {
@@ -501,5 +513,45 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     const message =
       this.errorMessages[error.statusCode] ?? `${this.providerDisplayName} API error: ${error.message}`;
     this.throwUserError(message);
+  }
+}
+
+export interface ConfigurableChatProviderOptions {
+  baseURL: string;
+  providerDisplayName: string;
+  models: vscode.LanguageModelChatInformation[];
+  errorMessages?: Record<number, string>;
+  mapModelId?: (modelId: string) => string;
+  supportsThinking?: boolean | ((modelId: string) => boolean);
+}
+
+export class ConfigurableChatProvider extends BaseChatProvider {
+  protected override readonly baseURL: string;
+  protected override readonly providerDisplayName: string;
+  protected override readonly models: vscode.LanguageModelChatInformation[];
+  protected override readonly errorMessages: Record<number, string>;
+  
+  private readonly _mapModelId?: (modelId: string) => string;
+  private readonly _supportsThinking?: boolean | ((modelId: string) => boolean);
+
+  constructor(authManager: BaseAuthManager, options: ConfigurableChatProviderOptions) {
+    super(authManager);
+    this.baseURL = options.baseURL;
+    this.providerDisplayName = options.providerDisplayName;
+    this.models = options.models;
+    this.errorMessages = options.errorMessages || {};
+    this._mapModelId = options.mapModelId;
+    this._supportsThinking = options.supportsThinking;
+  }
+
+  protected override mapModelId(modelId: string): string {
+    return this._mapModelId ? this._mapModelId(modelId) : modelId;
+  }
+
+  protected override supportsThinking(modelId: string): boolean {
+    if (typeof this._supportsThinking === 'function') {
+      return this._supportsThinking(modelId);
+    }
+    return this._supportsThinking ?? false;
   }
 }
