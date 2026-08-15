@@ -16,10 +16,10 @@ import type * as vscode from 'vscode';
 const defaultHttpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 64 });
 const defaultHttpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 64 });
 
-const customFetch = (url: string | URL | unknown, init?: RequestInit): Promise<Response> => {
+export const customFetch = (url: string | URL | unknown, init?: RequestInit): Promise<Response> => {
   const isHttp = typeof url === 'string' ? url.startsWith('http:') : (url instanceof URL && url.protocol === 'http:');
   const agent = isHttp ? defaultHttpAgent : defaultHttpsAgent;
-  return fetch(url as any, { ...init, agent, keepalive: true } as any);
+  return fetch(url as Parameters<typeof fetch>[0], { ...init, agent, keepalive: true } as Parameters<typeof fetch>[1]);
 };
 
 export interface GenericMessage {
@@ -257,6 +257,9 @@ export class GenericApiClient {
   }
 
   private toApiError(error: unknown): ApiError {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw error;
+    }
     return match(error)
       .when(
         (value): value is InstanceType<typeof OpenAI.APIError> => value instanceof OpenAI.APIError,

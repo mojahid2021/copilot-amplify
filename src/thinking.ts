@@ -1,5 +1,3 @@
-const THINK_OPEN = '<think>';
-const THINK_CLOSE = '</think>';
 const THINK_OPEN_MARKDOWN = '<details><summary>Thinking</summary>\n\n';
 const THINK_CLOSE_MARKDOWN = '\n\n</details>\n\n';
 
@@ -8,14 +6,39 @@ export interface ThinkingState {
   insideThinking: boolean;
 }
 
-function getPartialSuffixLength(buffer: string, marker: string): number {
-  const maxCheck = Math.min(buffer.length, marker.length - 1);
-  for (let i = maxCheck; i > 0; i--) {
-    if (marker.startsWith(buffer.slice(-i))) {
-      return i;
+function findFirstTagIndex(buffer: string, isClosing: boolean): { index: number; tagLength: number } {
+  const lower = buffer.toLowerCase();
+  const tags = isClosing ? ['</think>', '</thought>'] : ['<think>', '<thought>'];
+  let bestIndex = -1;
+  let bestTagLength = 0;
+
+  for (const tag of tags) {
+    const idx = lower.indexOf(tag);
+    if (idx >= 0 && (bestIndex === -1 || idx < bestIndex)) {
+      bestIndex = idx;
+      bestTagLength = tag.length;
     }
   }
-  return 0;
+
+  return { index: bestIndex, tagLength: bestTagLength };
+}
+
+function getPartialSuffixLength(buffer: string, isClosing: boolean): number {
+  const lower = buffer.toLowerCase();
+  const tags = isClosing ? ['</think>', '</thought>'] : ['<think>', '<thought>'];
+  let maxMatch = 0;
+
+  for (const tag of tags) {
+    const maxCheck = Math.min(lower.length, tag.length - 1);
+    for (let i = maxCheck; i > 0; i--) {
+      if (tag.startsWith(lower.slice(-i))) {
+        maxMatch = Math.max(maxMatch, i);
+        break;
+      }
+    }
+  }
+
+  return maxMatch;
 }
 
 function appendThinkingSegment(segment: string, insideThinking: boolean): string {
@@ -36,16 +59,15 @@ export function processThinkingContent(content: string, state: ThinkingState): {
   let insideThinking = state.insideThinking;
 
   while (buffer.length > 0) {
-    const marker = insideThinking ? THINK_CLOSE : THINK_OPEN;
-    const markerIndex = buffer.indexOf(marker);
+    const { index: markerIndex, tagLength } = findFirstTagIndex(buffer, insideThinking);
     if (markerIndex >= 0) {
       output += appendThinkingSegment(buffer.slice(0, markerIndex), insideThinking);
-      buffer = buffer.slice(markerIndex + marker.length);
+      buffer = buffer.slice(markerIndex + tagLength);
       insideThinking = !insideThinking;
       continue;
     }
 
-    const partialSuffixLength = getPartialSuffixLength(buffer, marker);
+    const partialSuffixLength = getPartialSuffixLength(buffer, insideThinking);
     if (partialSuffixLength === 0) {
       output += buffer;
       buffer = '';

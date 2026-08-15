@@ -4,7 +4,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from 'openai/resources/chat/completions/completions';
 import * as vscode from 'vscode';
-import { GenericApiClient, ApiError, type ChatOptions, type GenericMessage, type GenericTool } from './baseApi';
+import { GenericApiClient, ApiError, customFetch, type ChatOptions, type GenericMessage, type GenericTool } from './baseApi';
 import { getOmnirouteBaseUrl, getOmnirouteConfig } from './omnirouteConfig';
 import { omnirouteModelSupportsTemperature } from './omnirouteModelRegistry';
 
@@ -272,7 +272,7 @@ export class OmnirouteApiClient extends GenericApiClient {
     headers['Authorization'] = `Bearer ${this.apiKey}`;
 
     try {
-      const response = await fetch(this.getEndpoint('/chat/completions'), {
+      const response = await customFetch(this.getEndpoint('/chat/completions'), {
         method: 'POST',
         headers,
         body: JSON.stringify(this.buildBody(model, messages, options, true)),
@@ -335,7 +335,7 @@ export class OmnirouteApiClient extends GenericApiClient {
     headers['Authorization'] = `Bearer ${this.apiKey}`;
 
     try {
-      const response = await fetch(this.getEndpoint('/chat/completions'), {
+      const response = await customFetch(this.getEndpoint('/chat/completions'), {
         method: 'POST',
         headers,
         body: JSON.stringify(this.buildBody(model, messages, options, false)),
@@ -367,7 +367,7 @@ export class OmnirouteApiClient extends GenericApiClient {
     headers['Authorization'] = `Bearer ${this.apiKey}`;
 
     try {
-      const response = await fetch(this.getEndpoint('/chat/completions'), {
+      const response = await customFetch(this.getEndpoint('/chat/completions'), {
         method: 'POST',
         headers,
         body: JSON.stringify(this.buildBody(model, messages, options, false)),

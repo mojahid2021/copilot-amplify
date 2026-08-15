@@ -65,7 +65,7 @@ const ACTIONS = [
 
 // ─── Tree data provider ───────────────────────────────────────────────────────
 
-export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTreeItem> {
+export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTreeItem>, vscode.Disposable {
   private _onDidChangeTreeData = new vscode.EventEmitter<AnyTreeItem | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -79,7 +79,13 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   ) {
     if (this.context) {
       this.pinnedModels = this.context.globalState.get('pinnedModels', []);
+      this.activeProviderId = this.context.globalState.get('activeProviderId', 'xiaomi');
+      this.activeModelId = this.context.globalState.get('activeModelId', '');
     }
+  }
+
+  dispose(): void {
+    this._onDidChangeTreeData.dispose();
   }
 
   refresh(): void {
@@ -89,6 +95,10 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   setActiveModel(providerId: string, modelId: string): void {
     this.activeProviderId = providerId;
     this.activeModelId = modelId;
+    if (this.context) {
+      this.context.globalState.update('activeProviderId', providerId);
+      this.context.globalState.update('activeModelId', modelId);
+    }
     this.refresh();
   }
 

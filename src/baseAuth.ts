@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export class BaseAuthManager {
+export class BaseAuthManager implements vscode.Disposable {
   private readonly onDidChangeApiKeyEmitter = new vscode.EventEmitter<void>();
 
   readonly onDidChangeApiKey = this.onDidChangeApiKeyEmitter.event;
@@ -11,6 +11,10 @@ export class BaseAuthManager {
     private readonly displayName: string,
     private readonly legacySecretKey?: string,
   ) { }
+
+  dispose(): void {
+    this.onDidChangeApiKeyEmitter.dispose();
+  }
 
   async getApiKey(): Promise<string | undefined> {
     const key = await this.secrets.get(this.secretKey);

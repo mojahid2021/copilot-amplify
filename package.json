@@ -1,6 +1,6 @@
 {
   "name": "copilot-amplify",
-  "version": "1.0.35",
+  "version": "1.0.36",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
@@ -33,8 +33,7 @@
     "Chat"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onView:copilot-amplify.providers"
+    "onStartupFinished"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -42,6 +41,11 @@
       "title": "Copilot Amplify",
       "type": "object",
       "properties": {
+        "copilot-amplify.customSystemPrompt": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Custom system prompt or guardrail instructions to inject into chat requests across all providers."
+        },
         "copilot-amplify.xiaomi.apiKey": {
           "type": "string",
           "markdownDescription": "Xiaomi MiMo API Key. Get yours from the [Xiaomi MiMo console](https://www.xiaomimimo.com/). Both Pay-as-you-go (`sk-...`) and Token Plan (`tp-...`) keys are supported.",

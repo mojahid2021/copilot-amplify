@@ -33,11 +33,28 @@ export function convertTools(
 }
 
 export function parseToolArguments(argumentsText: string): Record<string, unknown> {
-  const parsed = secureJsonParse.safeParse(argumentsText || '{}');
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return {};
+  let cleaned = (argumentsText || '{}').trim();
+
+  // Strip markdown code block wrappers if present
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   }
-  return parsed as Record<string, unknown>;
+
+  const parsed = secureJsonParse.safeParse(cleaned);
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+
+  try {
+    const raw = JSON.parse(cleaned);
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      return raw as Record<string, unknown>;
+    }
+  } catch {
+    /* ignore parse errors */
+  }
+
+  return {};
 }
 
 function toGenericMessages(
@@ -99,8 +116,8 @@ function toGenericMessages(
         });
       })
       .otherwise((val) => {
-        if (val && typeof (val as any).value === 'string') {
-          pending.contentParts = appendTextContent(pending.contentParts, (val as any).value);
+        if (val && typeof val === 'object' && 'value' in val && typeof (val as { value?: unknown }).value === 'string') {
+          pending.contentParts = appendTextContent(pending.contentParts, (val as { value: string }).value);
         }
       });
   }
@@ -170,6 +187,9 @@ function flattenToolResultContent(
         .with(P.instanceOf(vscode.LanguageModelTextPart), (value) => value.value)
         .with(P.instanceOf(vscode.LanguageModelDataPart), (value) => dataPartToText(value))
         .otherwise((value) => {
+          if (value && typeof value === 'object' && 'value' in value && typeof (value as { value?: unknown }).value === 'string') {
+            return (value as { value: string }).value;
+          }
           try {
             return JSON.stringify(value);
           } catch {

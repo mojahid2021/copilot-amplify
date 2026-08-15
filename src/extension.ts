@@ -80,7 +80,7 @@ function registerProviderSafely(
   try {
     context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider(vendorId, provider));
   } catch (err) {
-    console.warn(`Could not register provider for ${dName}. It may already be registered.`);
+    console.warn(`Could not register provider for ${dName}: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -92,14 +92,16 @@ async function getLatestOmnirouteChatModel(key: string): Promise<string> {
   throw new Error('No models found for test connection.');
 }
 
-async function getLatestXiaomiChatModel(key: string): Promise<string> {
+async function getLatestXiaomiChatModel(): Promise<string> {
   return 'mimo-v2.5-pro';
 }
 
 export function activate(context: vscode.ExtensionContext): void {
   const authManagers: Record<string, BaseAuthManager> = {};
   for (const id of Object.keys(PROVIDERS)) {
-    authManagers[id] = createAuthManager(id, context.secrets);
+    const authManager = createAuthManager(id, context.secrets);
+    authManagers[id] = authManager;
+    context.subscriptions.push(authManager);
   }
 
   const omnirouteChatProvider = new OmnirouteChatProvider(authManagers['omniroute']);
@@ -111,6 +113,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const treeDataProvider = new ProvidersTreeDataProvider(authManagers, context);
 
   context.subscriptions.push(
+    treeDataProvider,
     vscode.window.createTreeView('copilot-amplify.providers', { treeDataProvider }),
   );
 
@@ -131,6 +134,10 @@ export function activate(context: vscode.ExtensionContext): void {
       ? omnirouteChatProvider
       : createConfigurableChatProvider(id, authManager);
 
+    if (!isOmniroute) {
+      context.subscriptions.push(providerInstance);
+    }
+
     providers.push({
       id: id as keyof typeof PROVIDER_VENDORS,
       displayName: cfg.displayName,
@@ -144,7 +151,9 @@ export function activate(context: vscode.ExtensionContext): void {
             clearApiClientCache();
             if (isOmniroute) omnirouteChatProvider.invalidateModelCache();
             treeDataProvider.refresh();
-          } catch (err) { }
+          } catch {
+            /* ignore error on action prompt cancel */
+          }
         },
         'Clear API Key':  async () => {
           try {
@@ -152,7 +161,9 @@ export function activate(context: vscode.ExtensionContext): void {
             clearApiClientCache();
             if (isOmniroute) omnirouteChatProvider.invalidateModelCache();
             treeDataProvider.refresh();
-          } catch (err) { }
+          } catch {
+            /* ignore error on action clear cancel */
+          }
         },
         'Test Connection': () => testConnection(
           authManager,

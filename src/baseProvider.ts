@@ -5,6 +5,8 @@ import { ApiError, GenericApiClient, type ReasoningEffort, type ThinkingOption }
 import type { BaseAuthManager } from './baseAuth';
 import { convertMessages, convertTools, parseToolArguments } from './converter';
 import { type ThinkingState, processThinkingContent } from './thinking';
+import { prepareContextMessages, estimateMessageTokens } from './contextManager';
+import { executeWithRetry } from './retryHandler';
 
 interface ToolCallBuilder {
   id: string;
@@ -56,36 +58,6 @@ function getNumberModelOption(
 ): number | undefined {
   const value = getModelOption(options, name);
   return typeof value === 'number' ? value : undefined;
-}
-
-function estimateDataPartSize(part: vscode.LanguageModelDataPart): number {
-  return part.data.byteLength;
-}
-
-function estimateUnknownPartSize(value: unknown): number {
-  try {
-    return JSON.stringify(value)?.length ?? 0;
-  } catch {
-    return String(value).length;
-  }
-}
-
-function estimateToolResultSize(
-  parts: readonly (vscode.LanguageModelTextPart | vscode.LanguageModelPromptTsxPart | vscode.LanguageModelDataPart | unknown)[],
-): number {
-  let total = 0;
-
-  for (const part of parts) {
-    if (part instanceof vscode.LanguageModelTextPart) {
-      total += part.value.length;
-    } else if (part instanceof vscode.LanguageModelDataPart) {
-      total += estimateDataPartSize(part);
-    } else {
-      total += estimateUnknownPartSize(part);
-    }
-  }
-
-  return total;
 }
 
 export abstract class BaseChatProvider implements vscode.LanguageModelChatProvider, vscode.Disposable {
@@ -235,15 +207,22 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     }
 
     try {
-      await this.streamResponse(
-        this.getOrCreateClient(apiKey),
-        model,
-        messages,
-        options,
-        progress,
+      await executeWithRetry(
+        () =>
+          this.streamResponse(
+            this.getOrCreateClient(apiKey),
+            model,
+            messages,
+            options,
+            progress,
+            token,
+          ),
         token,
       );
     } catch (error) {
+      if (token.isCancellationRequested || (error instanceof Error && error.name === 'CancelledError')) {
+        return;
+      }
       this.throwMappedError(error);
     }
   }
@@ -256,26 +235,16 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     void token;
 
     if (typeof text === 'string') {
-      return Promise.resolve(Math.ceil(text.length / 4));
+      return Promise.resolve(Math.ceil(text.length / 3.8));
     }
 
-    let totalChars = 0;
-    for (const part of text.content) {
-      if (part instanceof vscode.LanguageModelTextPart) {
-        totalChars += part.value.length;
-      } else if (part instanceof vscode.LanguageModelDataPart) {
-        totalChars += estimateDataPartSize(part);
-      } else if (part instanceof vscode.LanguageModelToolCallPart) {
-        totalChars += part.name.length;
-        totalChars += estimateUnknownPartSize(part.input);
-      } else if (part instanceof vscode.LanguageModelToolResultPart) {
-        totalChars += estimateToolResultSize(part.content);
-      } else {
-        totalChars += estimateUnknownPartSize(part);
-      }
+    const converted = convertMessages([text], true);
+    let total = 0;
+    for (const msg of converted) {
+      total += estimateMessageTokens(msg);
     }
 
-    return Promise.resolve(Math.ceil(totalChars / 4));
+    return Promise.resolve(total);
   }
 
   protected async streamResponse(
@@ -291,23 +260,25 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     let structuredReasoningActive = false;
     let hasReportedAnyPart = false;
 
-    // Micro-buffer text chunks to optimize IPC throughput for high-speed models in VS Code
-    let pendingText = '';
-    let lastFlushTime = Date.now();
+    const maxTokensOption = getNumberModelOption(options, 'maxTokens');
+    const preparedMessages = prepareContextMessages(
+      messages,
+      model.capabilities.imageInput === true,
+      {
+        maxInputTokens: model.maxInputTokens ?? 128000,
+        reserveOutputTokens: maxTokensOption ?? model.maxOutputTokens ?? 4096,
+      },
+    );
 
-    const flushText = () => {
-      if (pendingText.length > 0) {
-        progress.report(new vscode.LanguageModelTextPart(pendingText));
-        pendingText = '';
-        lastFlushTime = Date.now();
-      }
-    };
+    const startTime = Date.now();
+    let ttft: number | undefined;
+    let tokenCount = 0;
 
     const stream = client.streamChat(
       this.mapModelId(model.id),
-      convertMessages(messages, model.capabilities.imageInput === true),
+      preparedMessages,
       {
-        maxTokens: getNumberModelOption(options, 'maxTokens'),
+        maxTokens: maxTokensOption,
         tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
         toolChoice:
           model.capabilities.toolCalling && options.tools?.length
@@ -340,10 +311,14 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
         const reasoning = typeof delta.reasoning_content === 'string' ? delta.reasoning_content
           : typeof delta.reasoning === 'string' ? delta.reasoning
           : typeof delta.thought === 'string' ? delta.thought
+          : typeof delta.thinking === 'string' ? delta.thinking
+          : typeof delta.reasoning_text === 'string' ? delta.reasoning_text
           : undefined;
 
         if (reasoning) {
-          flushText();
+          if (ttft === undefined) {
+            ttft = Date.now() - startTime;
+          }
           this.reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
           structuredReasoningActive = true;
           hasReportedAnyPart = true;
@@ -354,26 +329,24 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
           : undefined;
 
         if (content) {
+          if (ttft === undefined) {
+            ttft = Date.now() - startTime;
+          }
           if (structuredReasoningActive) {
-            flushText();
             this.closeStructuredReasoning(progress);
             structuredReasoningActive = false;
           }
           const result = processThinkingContent(content, thinkingState);
           thinkingState = result.state;
           if (result.output) {
-            pendingText += result.output;
-            const now = Date.now();
-            if (pendingText.length >= 32 || now - lastFlushTime >= 16) {
-              flushText();
-            }
+            progress.report(new vscode.LanguageModelTextPart(result.output));
+            tokenCount++;
           }
           hasReportedAnyPart = true;
         }
 
         this.collectToolCalls(choice.delta.tool_calls, toolCallBuilders);
         if (choice.finish_reason === 'tool_calls') {
-          flushText();
           if (structuredReasoningActive) {
             this.closeStructuredReasoning(progress);
             structuredReasoningActive = false;
@@ -385,10 +358,9 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     }
 
     if (thinkingState.buffer.length > 0) {
-      pendingText += thinkingState.buffer;
+      progress.report(new vscode.LanguageModelTextPart(thinkingState.buffer));
       thinkingState.buffer = '';
     }
-    flushText();
 
     if (structuredReasoningActive) {
       this.closeStructuredReasoning(progress);
@@ -396,13 +368,19 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
 
     this.reportToolCalls(progress, toolCallBuilders);
 
+    const totalTimeSec = (Date.now() - startTime) / 1000;
+    const tps = totalTimeSec > 0 ? (tokenCount / totalTimeSec).toFixed(1) : '0';
+    console.log(
+      `[${this.providerDisplayName}] Stream complete (${model.id}): TTFT=${ttft ?? 0}ms, Tokens=${tokenCount}, Speed=${tps} tok/s`
+    );
+
     if (!hasReportedAnyPart && !token.isCancellationRequested) {
       console.warn(`[${this.providerDisplayName}] Streaming yielded no parts. Retrying with non-streaming completion...`);
       const fallbackContent = await client.chatNonStreaming(
         this.mapModelId(model.id),
-        convertMessages(messages, model.capabilities.imageInput === true),
+        preparedMessages,
         {
-          maxTokens: getNumberModelOption(options, 'maxTokens'),
+          maxTokens: maxTokensOption,
           tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
           extraBody: this.getExtraBody(model.id),
         },
@@ -446,32 +424,6 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     }
 
     progress.report(new vscode.LanguageModelTextPart(STRUCTURED_THINKING_CLOSE));
-  }
-
-  private reportTextDelta(
-    content: string | null | undefined,
-    state: ThinkingState,
-    progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-  ): ThinkingState {
-    if (!content) {
-      return state;
-    }
-
-    if (
-      !state.insideThinking
-      && state.buffer.length === 0
-      && !content.includes('<think>')
-      && !content.includes('</think>')
-    ) {
-      progress.report(new vscode.LanguageModelTextPart(content));
-      return state;
-    }
-
-    const result = processThinkingContent(content, state);
-    if (result.output) {
-      progress.report(new vscode.LanguageModelTextPart(result.output));
-    }
-    return result.state;
   }
 
   private collectToolCalls(
