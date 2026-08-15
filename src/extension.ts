@@ -14,15 +14,6 @@ const PROVIDER_VENDORS = {
   omniroute: 'LuneCode.omniroute',
 } as const;
 
-interface ProviderConfig {
-  id: keyof typeof PROVIDER_VENDORS;
-  displayName: string;
-  vendor:     string;
-  authManager: BaseAuthManager;
-  provider:   vscode.LanguageModelChatProvider;
-  manageActions: Record<string, () => Promise<void>>;
-}
-
 type TestModelResolver = string | ((key: string) => Promise<string>);
 
 function getAuthManager(id: string, authManagers: Record<string, BaseAuthManager>): BaseAuthManager | undefined {
@@ -117,18 +108,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.createTreeView('copilot-amplify.providers', { treeDataProvider }),
   );
 
-  const providers: ProviderConfig[] = [];
-
   for (const [id, cfg] of Object.entries(PROVIDERS)) {
     const isOmniroute = id === 'omniroute';
     const authManager = authManagers[id];
-
-    // Dynamic models for Xiaomi and Omniroute testing
-    const testModelResolver = id === 'omniroute'
-      ? getLatestOmnirouteChatModel
-      : id === 'xiaomi'
-        ? getLatestXiaomiChatModel
-        : cfg.chatProviderOptions?.models[0]?.id || '';
 
     const providerInstance = isOmniroute
       ? omnirouteChatProvider
@@ -138,51 +120,90 @@ export function activate(context: vscode.ExtensionContext): void {
       context.subscriptions.push(providerInstance);
     }
 
-    providers.push({
-      id: id as keyof typeof PROVIDER_VENDORS,
-      displayName: cfg.displayName,
-      vendor: PROVIDER_VENDORS[id as keyof typeof PROVIDER_VENDORS],
-      authManager,
-      provider: providerInstance,
-      manageActions: {
-        'Set API Key':    async () => {
-          try {
-            await authManager.promptForApiKey();
-            clearApiClientCache();
-            if (isOmniroute) omnirouteChatProvider.invalidateModelCache();
-            treeDataProvider.refresh();
-          } catch {
-            /* ignore error on action prompt cancel */
-          }
-        },
-        'Clear API Key':  async () => {
-          try {
-            await authManager.deleteApiKey();
-            clearApiClientCache();
-            if (isOmniroute) omnirouteChatProvider.invalidateModelCache();
-            treeDataProvider.refresh();
-          } catch {
-            /* ignore error on action clear cancel */
-          }
-        },
-        'Test Connection': () => testConnection(
-          authManager,
-          isOmniroute ? (k) => new OmnirouteApiClient(k, {}) : (k) => createApiClient(id, k),
-          testModelResolver,
-          cfg.displayName
-        ),
-      },
-    });
+    const vendor = PROVIDER_VENDORS[id as keyof typeof PROVIDER_VENDORS];
+    if (vendor) {
+      registerProviderSafely(context, vendor, cfg.displayName, providerInstance);
+    }
   }
 
-  // Register all language model providers
-  for (const cfg of providers) {
-    registerProviderSafely(context, cfg.vendor, cfg.displayName, cfg.provider);
-  }
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.command = 'copilot-amplify.manage';
+  const initialModel = context.globalState.get<string>('activeModelId', '');
+  statusBarItem.text = initialModel ? `$(sparkle) Amplify: ${initialModel}` : '$(sparkle) Copilot Amplify';
+  statusBarItem.tooltip = 'Copilot Amplify: Click to manage providers & active models';
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
 
   // ── Commands ───────────────────────────────────────────────────────────────
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('copilot-amplify.manage', async () => {
+      const selectedAction = await vscode.window.showQuickPick(
+        [
+          { label: '$(key) Set API Key', action: 'setApiKey', description: 'Configure credentials for a provider' },
+          { label: '$(plug) Test Connection', action: 'test', description: 'Verify provider connection & model availability' },
+          { label: '$(trash) Clear API Key', action: 'clearApiKey', description: 'Remove saved credentials' },
+          { label: '$(sync) Refresh Providers & Models', action: 'refresh', description: 'Refetch live models and update state' },
+          { label: '$(output) Show Telemetry Logs', action: 'telemetry', description: 'Open Omniroute response logs' },
+        ],
+        { placeHolder: 'Manage Copilot Amplify Providers' },
+      );
+
+      if (!selectedAction) {
+        return;
+      }
+
+      if (selectedAction.action === 'refresh') {
+        clearApiClientCache();
+        omnirouteChatProvider.invalidateModelCache();
+        treeDataProvider.refresh();
+        return;
+      }
+      if (selectedAction.action === 'telemetry') {
+        getOmnirouteLogChannel().show(true);
+        return;
+      }
+
+      const providerChoices = Object.entries(PROVIDERS).map(([id, cfg]) => ({
+        label: cfg.displayName,
+        id,
+      }));
+
+      const selectedProvider = await vscode.window.showQuickPick(providerChoices, {
+        placeHolder: `Select provider to ${selectedAction.label.toLowerCase()}`,
+      });
+
+      if (!selectedProvider) {
+        return;
+      }
+
+      const id = selectedProvider.id;
+      const auth = getAuthManager(id, authManagers);
+      if (!auth) {
+        return;
+      }
+
+      if (selectedAction.action === 'setApiKey') {
+        await auth.promptForApiKey();
+        clearApiClientCache();
+        if (id === 'omniroute') {
+          omnirouteChatProvider.invalidateModelCache();
+        }
+        treeDataProvider.refresh();
+      } else if (selectedAction.action === 'test') {
+        const { modelId, clientFactory } = getTestInfo(id);
+        await testConnection(auth, clientFactory, modelId, displayName(id));
+      } else if (selectedAction.action === 'clearApiKey') {
+        await auth.deleteApiKey();
+        clearApiClientCache();
+        if (id === 'omniroute') {
+          omnirouteChatProvider.invalidateModelCache();
+        }
+        treeDataProvider.refresh();
+        vscode.window.showInformationMessage(`${displayName(id)} API key cleared`);
+      }
+    }),
+
     vscode.commands.registerCommand('copilot-amplify.refresh', () => {
       clearApiClientCache();
       omnirouteChatProvider.invalidateModelCache();
@@ -241,6 +262,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('copilot-amplify.selectModel', async (item?: ModelTreeItem) => {
       if (item && item.providerId && item.modelId) {
         treeDataProvider.setActiveModel(item.providerId, item.modelId);
+        statusBarItem.text = `$(sparkle) Amplify: ${item.modelId}`;
+        vscode.window.showInformationMessage(`Selected model ${item.modelId}`);
       }
     }),
 

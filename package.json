@@ -161,29 +161,49 @@
           "command": "copilot-amplify.clearApiKey",
           "when": "view == copilot-amplify.providers && viewItem == 'provider'",
           "group": "inline@3"
+        },
+        {
+          "command": "copilot-amplify.pinModel",
+          "when": "view == copilot-amplify.providers && viewItem == 'model'",
+          "group": "inline@1"
+        },
+        {
+          "command": "copilot-amplify.selectModel",
+          "when": "view == copilot-amplify.providers && (viewItem == 'model' || viewItem == 'favorite-model')",
+          "group": "inline@2"
+        },
+        {
+          "command": "copilot-amplify.unpinModel",
+          "when": "view == copilot-amplify.providers && viewItem == 'favorite-model'",
+          "group": "inline@1"
         }
       ]
     },
     "languageModelChatProviders": [
       {
         "vendor": "LuneCode.xiaomi",
-        "displayName": "Xiaomi"
+        "displayName": "Xiaomi",
+        "managementCommand": "copilot-amplify.manage"
       },
       {
         "vendor": "LuneCode.glm",
-        "displayName": "Z.ai"
+        "displayName": "Z.ai",
+        "managementCommand": "copilot-amplify.manage"
       },
       {
         "vendor": "LuneCode.groq",
-        "displayName": "Groq"
+        "displayName": "Groq",
+        "managementCommand": "copilot-amplify.manage"
       },
       {
         "vendor": "LuneCode.nvidia",
-        "displayName": "NVIDIA NIM"
+        "displayName": "NVIDIA NIM",
+        "managementCommand": "copilot-amplify.manage"
       },
       {
         "vendor": "LuneCode.omniroute",
-        "displayName": "Omniroute"
+        "displayName": "Omniroute",
+        "managementCommand": "copilot-amplify.manage"
       }
     ],
     "commands": [
@@ -194,19 +214,38 @@
       },
       {
         "command": "copilot-amplify.manage",
-        "title": "Manage Providers..."
+        "title": "Manage Providers...",
+        "icon": "$(gear)"
       },
       {
         "command": "copilot-amplify.setApiKey",
-        "title": "Set API Key"
+        "title": "Set API Key",
+        "icon": "$(key)"
       },
       {
         "command": "copilot-amplify.testConnection",
-        "title": "Test Connection"
+        "title": "Test Connection",
+        "icon": "$(plug)"
       },
       {
         "command": "copilot-amplify.clearApiKey",
-        "title": "Clear API Key"
+        "title": "Clear API Key",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "copilot-amplify.pinModel",
+        "title": "Pin to Favorites",
+        "icon": "$(star-full)"
+      },
+      {
+        "command": "copilot-amplify.unpinModel",
+        "title": "Unpin from Favorites",
+        "icon": "$(star-delete)"
+      },
+      {
+        "command": "copilot-amplify.selectModel",
+        "title": "Select Model",
+        "icon": "$(check)"
       },
       {
         "command": "copilot-amplify.provider.click",

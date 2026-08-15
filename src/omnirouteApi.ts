@@ -4,7 +4,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from 'openai/resources/chat/completions/completions';
 import * as vscode from 'vscode';
-import { GenericApiClient, ApiError, customFetch, type ChatOptions, type GenericMessage, type GenericTool } from './baseApi';
+import { GenericApiClient, ApiError, customFetch, type ChatOptions, type GenericMessage } from './baseApi';
 import { getOmnirouteBaseUrl, getOmnirouteConfig } from './omnirouteConfig';
 import { omnirouteModelSupportsTemperature } from './omnirouteModelRegistry';
 
@@ -24,12 +24,6 @@ export function getChatBaseUrl(): string {
 }
 
 export const CHAT_BASE_URL = getChatBaseUrl();
-export const MODELS_BASE_URL = getChatBaseUrl();
-export const BASE_URL = CHAT_BASE_URL;
-
-export type OmnirouteMessage = GenericMessage;
-export type OmnirouteTool = GenericTool;
-export { ApiError as OmnirouteApiError };
 
 export interface OmnirouteClientOptions {
   /** Caller-supplied conversation tag. Beats the `sessionId` setting. */
