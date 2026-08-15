@@ -1,6 +1,6 @@
 {
   "name": "copilot-amplify",
-  "version": "1.0.31",
+  "version": "1.0.35",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
@@ -33,7 +33,8 @@
     "Chat"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onView:copilot-amplify.providers"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -65,6 +66,11 @@
           "type": "string",
           "markdownDescription": "Omniroute Bearer token. Configure the local Omniroute server (default `http://localhost:20128/v1`) with your provider credentials, then enter its API key here.",
           "secret": true
+        },
+        "copilot-amplify.enableReasoning": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Globally enable reasoning capabilities for supported models (e.g. DeepSeek-R1, QwQ). This applies to both the Chat panel and native Copilot Chat."
         },
         "copilot-amplify.omniroute.baseUrl": {
           "type": "string",
@@ -121,12 +127,6 @@
     "views": {
       "copilot-amplify-view-container": [
         {
-          "id": "copilot-amplify.chatView",
-          "name": "Chat",
-          "type": "webview",
-          "icon": "media/icon.svg"
-        },
-        {
           "id": "copilot-amplify.providers",
           "name": "Providers & Models",
           "type": "tree",
@@ -140,19 +140,9 @@
           "command": "copilot-amplify.refresh",
           "when": "view == copilot-amplify.providers",
           "group": "0_copilot-amplify/navigation"
-        },
-        {
-          "command": "copilot-amplify.openChat",
-          "when": "view == copilot-amplify.providers",
-          "group": "0_copilot-amplify/navigation@1"
         }
       ],
       "view/item/context": [
-        {
-          "command": "copilot-amplify.openChat",
-          "when": "view == copilot-amplify.providers && viewItem == 'provider'",
-          "group": "inline@0"
-        },
         {
           "command": "copilot-amplify.setApiKey",
           "when": "view == copilot-amplify.providers && viewItem == 'provider'",
@@ -195,7 +185,7 @@
     "commands": [
       {
         "command": "copilot-amplify.refresh",
-        "title": "Refresh",
+        "title": "Refresh Providers & Models",
         "icon": "$(sync)"
       },
       {
@@ -218,11 +208,6 @@
         "command": "copilot-amplify.provider.click",
         "title": "Open Provider",
         "enablement": "false"
-      },
-      {
-        "command": "copilot-amplify.openChat",
-        "title": "Chat",
-        "icon": "$(comment)"
       },
       {
         "command": "copilot-amplify.omniroute.showTelemetry",

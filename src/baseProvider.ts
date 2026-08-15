@@ -125,11 +125,14 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
       return undefined;
     }
 
+    const isGlobalReasoningEnabled = vscode.workspace.getConfiguration('copilot-amplify').get<boolean>('enableReasoning', true);
+
     const reasoningEffort = getModelOption(options, 'reasoningEffort');
-    return {
-      type: reasoningEffort === 'none' ? 'disabled' : 'enabled',
-      clear_thinking: true,
-    };
+    if (!isGlobalReasoningEnabled || reasoningEffort === 'none') {
+      return { type: 'disabled', clear_thinking: true };
+    }
+
+    return { type: 'enabled', clear_thinking: true };
   }
 
   protected getExtraBody(_modelId?: string): Record<string, unknown> | undefined {
@@ -143,6 +146,11 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   ): ReasoningEffort | undefined {
     if (!this.supportsThinking(modelId)) {
       return undefined;
+    }
+
+    const isGlobalReasoningEnabled = vscode.workspace.getConfiguration('copilot-amplify').get<boolean>('enableReasoning', true);
+    if (!isGlobalReasoningEnabled) {
+      return undefined; // Usually undefined means default, but the provider might interpret setting no reasoning effort when thinking is disabled
     }
 
     return this.toReasoningEffort(getModelOption(options, 'reasoningEffort'));
@@ -551,7 +559,7 @@ export class ConfigurableChatProvider extends BaseChatProvider {
   protected override readonly providerDisplayName: string;
   protected override readonly models: vscode.LanguageModelChatInformation[];
   protected override readonly errorMessages: Record<number, string>;
-  
+
   private readonly _mapModelId?: (modelId: string) => string;
   private readonly _supportsThinking?: boolean | ((modelId: string) => boolean);
 

@@ -3,11 +3,7 @@ import { fetchOmnirouteModels, OmnirouteChatProvider, resolveOmnirouteUpstreamMo
 import { getOmnirouteLogChannel, OmnirouteApiClient } from './omnirouteApi';
 import { GenericApiClient } from './baseApi';
 import type { BaseAuthManager } from './baseAuth';
-import { ProvidersTreeDataProvider, ProviderTreeItem } from './treeProvider';
-import { openChatPanel, buildProviderConfigs } from './chatPanel';
-import { SessionManager } from './sessionManager';
-import { ContextManager } from './contextManager';
-import { ChatViewProvider } from './chatViewProvider';
+import { ProvidersTreeDataProvider, ProviderTreeItem, ModelTreeItem } from './treeProvider';
 import { PROVIDERS, createAuthManager, createApiClient, createConfigurableChatProvider, clearApiClientCache } from './providers';
 
 const PROVIDER_VENDORS = {
@@ -107,49 +103,32 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   const omnirouteChatProvider = new OmnirouteChatProvider(authManagers['omniroute']);
-  const contextManager = new ContextManager();
-  const sessionManager = new SessionManager(context);
-  
+
   context.subscriptions.push(
     omnirouteChatProvider,
-    contextManager,
   );
 
-  const treeDataProvider = new ProvidersTreeDataProvider(authManagers);
+  const treeDataProvider = new ProvidersTreeDataProvider(authManagers, context);
 
   context.subscriptions.push(
     vscode.window.createTreeView('copilot-amplify.providers', { treeDataProvider }),
   );
 
-  const chatProviderConfigs = buildProviderConfigs(authManagers);
-  const chatViewProvider = new ChatViewProvider(
-    context.extensionUri,
-    chatProviderConfigs,
-    sessionManager,
-    contextManager,
-  );
-
-  context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider, {
-      webviewOptions: { retainContextWhenHidden: true },
-    }),
-  );
-
   const providers: ProviderConfig[] = [];
-  
+
   for (const [id, cfg] of Object.entries(PROVIDERS)) {
     const isOmniroute = id === 'omniroute';
     const authManager = authManagers[id];
-    
+
     // Dynamic models for Xiaomi and Omniroute testing
-    const testModelResolver = id === 'omniroute' 
-      ? getLatestOmnirouteChatModel 
+    const testModelResolver = id === 'omniroute'
+      ? getLatestOmnirouteChatModel
       : id === 'xiaomi'
         ? getLatestXiaomiChatModel
         : cfg.chatProviderOptions?.models[0]?.id || '';
 
-    const providerInstance = isOmniroute 
-      ? omnirouteChatProvider 
+    const providerInstance = isOmniroute
+      ? omnirouteChatProvider
       : createConfigurableChatProvider(id, authManager);
 
     providers.push({
@@ -176,9 +155,9 @@ export function activate(context: vscode.ExtensionContext): void {
           } catch (err) { }
         },
         'Test Connection': () => testConnection(
-          authManager, 
-          isOmniroute ? (k) => new OmnirouteApiClient(k, {}) : (k) => createApiClient(id, k), 
-          testModelResolver, 
+          authManager,
+          isOmniroute ? (k) => new OmnirouteApiClient(k, {}) : (k) => createApiClient(id, k),
+          testModelResolver,
           cfg.displayName
         ),
       },
@@ -197,7 +176,6 @@ export function activate(context: vscode.ExtensionContext): void {
       clearApiClientCache();
       omnirouteChatProvider.invalidateModelCache();
       treeDataProvider.refresh();
-      void chatViewProvider.publicRefresh();
     }),
 
     vscode.commands.registerCommand('copilot-amplify.provider.click', async (item: ProviderTreeItem) => {
@@ -235,6 +213,26 @@ export function activate(context: vscode.ExtensionContext): void {
       if (auth) { await auth.deleteApiKey(); vscode.window.showInformationMessage(`${displayName(id)} API key cleared`); treeDataProvider.refresh(); }
     }),
 
+    vscode.commands.registerCommand('copilot-amplify.pinModel', (item?: ModelTreeItem) => {
+      if (item && item.providerId && item.modelId) {
+        const name = typeof item.label === 'string' ? item.label : item.modelId;
+        treeDataProvider.pinModel(item.providerId, item.modelId, name);
+        vscode.window.showInformationMessage(`Pinned ${name} to Favorites`);
+      }
+    }),
+
+    vscode.commands.registerCommand('copilot-amplify.unpinModel', (item?: ModelTreeItem) => {
+      if (item && item.providerId && item.modelId) {
+        treeDataProvider.unpinModel(item.providerId, item.modelId);
+      }
+    }),
+
+    vscode.commands.registerCommand('copilot-amplify.selectModel', async (item?: ModelTreeItem) => {
+      if (item && item.providerId && item.modelId) {
+        treeDataProvider.setActiveModel(item.providerId, item.modelId);
+      }
+    }),
+
     vscode.commands.registerCommand('copilot-amplify.documentation', () => {
       void vscode.env.openExternal(vscode.Uri.parse('https://github.com/mojahid2021/copilot-amplify#readme'));
     }),
@@ -243,21 +241,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('copilot-amplify.omniroute.showTelemetry', () => {
       getOmnirouteLogChannel().show(true);
-    }),
-
-    vscode.commands.registerCommand('copilot-amplify.openChat', () => {
-      openChatPanel(context, chatProviderConfigs, sessionManager, contextManager);
     })
   );
-
-  if (vscode.window.registerWebviewPanelSerializer) {
-    vscode.window.registerWebviewPanelSerializer('copilotAmplifyChat', {
-      async deserializeWebviewPanel(webviewPanel: vscode.WebviewPanel, _state: any) {
-        // ChatPanel handles its own state restoration via SessionManager.
-        openChatPanel(context, chatProviderConfigs, sessionManager, contextManager);
-      }
-    });
-  }
 }
 
 export function deactivate(): void {
