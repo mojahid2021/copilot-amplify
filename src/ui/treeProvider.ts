@@ -1,54 +1,40 @@
 import * as vscode from 'vscode';
-import type { BaseAuthManager } from './baseAuth';
-import {
-  MIMO_MODELS,
-  GLM_MODELS,
-  GROQ_MODELS,
-  NIM_MODELS,
-} from './models';
-import { fetchOmnirouteModels, decodeOmnirouteModelId } from './omnirouteProvider';
+import type { ProviderRegistry, ProviderTreeModel } from '../core/provider/registry';
+import type { ProviderHealth, ProviderId } from '../core/provider/registry';
 
-// ─── Provider metadata ───────────────────────────────────────────────────────
-
-interface ProviderMeta {
-  brand:     string;
-  modelCount: number | 'live';
-  icon:      string;
-}
-
-const PROVIDER_META: Record<string, ProviderMeta> = {
-  xiaomi:    { brand: 'Xiaomi MiMo', modelCount: MIMO_MODELS.length, icon: 'device-mobile' },
-  glm:       { brand: 'Z.ai GLM',    modelCount: GLM_MODELS.length,  icon: 'hubot'         },
-  groq:      { brand: 'Groq',        modelCount: GROQ_MODELS.length, icon: 'rocket'        },
-  nvidia:    { brand: 'NVIDIA NIM',  modelCount: NIM_MODELS.length,  icon: 'server'        },
-  omniroute: { brand: 'Omniroute',   modelCount: 'live',             icon: 'circuit-board' },
-};
+/**
+ * Providers & Models tree.
+ *
+ * Consumes the provider registry exclusively: model rows come from each
+ * provider's cached list (`listModelsForTree`), so expanding a section never
+ * performs network I/O. Run "Refresh Providers & Models" to update caches.
+ */
 
 // ─── Tree item interfaces ────────────────────────────────────────────────────
 
 export interface ProviderTreeItem extends vscode.TreeItem {
-  providerId:   string;
+  providerId: string;
   contextValue: 'provider';
 }
 
 export interface SectionTreeItem extends vscode.TreeItem {
-  sectionId:    string;
+  sectionId: string;
   contextValue: 'section';
 }
 
 export interface ModelGroupTreeItem extends vscode.TreeItem {
-  modelId:      string;
+  modelId: string;
   contextValue: 'model-group';
 }
 
 export interface ModelTreeItem extends vscode.TreeItem {
-  modelId:      string;
-  providerId:   string;
+  modelId: string;
+  providerId: string;
   contextValue: 'model' | 'favorite-model';
 }
 
 export interface ActionTreeItem extends vscode.TreeItem {
-  actionId:     string;
+  actionId: string;
   contextValue: 'action';
 }
 
@@ -58,24 +44,33 @@ type AnyTreeItem = ProviderTreeItem | SectionTreeItem | ModelGroupTreeItem | Mod
 
 const ACTIONS = [
   { id: 'refresh', label: 'Refresh Providers & Models', icon: 'sync', command: 'copilot-amplify.refresh' },
-  { id: 'telemetry', label: 'Show Omniroute Telemetry Logs', icon: 'output', command: 'copilot-amplify.omniroute.showTelemetry' },
+  { id: 'edit-endpoint', label: 'Edit OmniRoute Chat Endpoint', icon: 'edit', command: 'copilot-amplify.omniroute.editChatEndpoint' },
+  { id: 'diagnostics', label: 'Show Diagnostics', icon: 'pulse', command: 'copilot-amplify.showDiagnostics' },
+  { id: 'omniroute-diagnostics', label: 'Show OmniRoute Diagnostics', icon: 'pulse', command: 'copilot-amplify.omniroute.showDiagnostics' },
+  { id: 'telemetry', label: 'Show OmniRoute Telemetry Logs', icon: 'output', command: 'copilot-amplify.omniroute.showTelemetry' },
   { id: 'docs', label: 'View Documentation & Guide', icon: 'book', command: 'copilot-amplify.documentation' },
   { id: 'report', label: 'Report Issue or Feedback', icon: 'bug', command: 'copilot-amplify.report' },
 ];
 
 // ─── Tree data provider ───────────────────────────────────────────────────────
 
+interface PinnedModel {
+  providerId: string;
+  modelId: string;
+  name: string;
+}
+
 export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTreeItem>, vscode.Disposable {
   private _onDidChangeTreeData = new vscode.EventEmitter<AnyTreeItem | undefined | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  private pinnedModels: Array<{ providerId: string; modelId: string; name: string }> = [];
+  private pinnedModels: PinnedModel[] = [];
   private activeProviderId = 'xiaomi';
   private activeModelId = '';
 
   constructor(
-    private readonly authManagers: Record<string, BaseAuthManager>,
-    private readonly context?: vscode.ExtensionContext
+    private readonly registry: ProviderRegistry,
+    private readonly context?: vscode.ExtensionContext,
   ) {
     if (this.context) {
       this.pinnedModels = this.context.globalState.get('pinnedModels', []);
@@ -103,7 +98,7 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   }
 
   pinModel(providerId: string, modelId: string, name: string): void {
-    if (!this.pinnedModels.some(m => m.providerId === providerId && m.modelId === modelId)) {
+    if (!this.pinnedModels.some((m) => m.providerId === providerId && m.modelId === modelId)) {
       this.pinnedModels.push({ providerId, modelId, name });
       this.savePinnedModels();
       this.refresh();
@@ -111,7 +106,7 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   }
 
   unpinModel(providerId: string, modelId: string): void {
-    this.pinnedModels = this.pinnedModels.filter(m => !(m.providerId === providerId && m.modelId === modelId));
+    this.pinnedModels = this.pinnedModels.filter((m) => !(m.providerId === providerId && m.modelId === modelId));
     this.savePinnedModels();
     this.refresh();
   }
@@ -132,7 +127,7 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
       return this.getSectionChildren((element as SectionTreeItem).sectionId);
     }
     if (element.contextValue === 'model-group') {
-      return this.getModelsForProvider((element as ModelGroupTreeItem).modelId);
+      return this.getModelsForProvider((element as ModelGroupTreeItem).modelId as ProviderId);
     }
     return [];
   }
@@ -154,21 +149,21 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     switch (sectionId) {
       case 'favorites': return this.getFavoriteItems();
       case 'providers': return this.getProviderItems();
-      case 'models':    return this.getModelItems();
-      case 'actions':   return this.getActionItems();
-      default:         return [];
+      case 'models': return this.getModelItems();
+      case 'actions': return this.getActionItems();
+      default: return [];
     }
   }
 
   private getFavoriteItems(): ModelTreeItem[] {
     return this.pinnedModels.map((fav) => {
+      const descriptor = this.registry.get(fav.providerId as ProviderId);
       const item = new vscode.TreeItem(fav.name, vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
       item.modelId = fav.modelId;
       item.providerId = fav.providerId;
       item.contextValue = 'favorite-model';
-      const meta = PROVIDER_META[fav.providerId];
       const isSelected = this.activeProviderId === fav.providerId && this.activeModelId === fav.modelId;
-      item.description = `${meta?.brand ?? fav.providerId} ${isSelected ? '✓ Active' : ''}`;
+      item.description = `${descriptor?.displayName ?? fav.providerId} ${isSelected ? '✓ Active' : ''}`;
       item.iconPath = new vscode.ThemeIcon('star-full', new vscode.ThemeColor('symbolIcon.keywordForeground'));
       item.command = {
         command: 'copilot-amplify.selectModel',
@@ -182,46 +177,80 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   // ── PROVIDERS section ───────────────────────────────────────────────────────
 
   private async getProviderItems(): Promise<ProviderTreeItem[]> {
-    const [k1, k2, k3, k4, k5] = await Promise.all([
-      this.authManagers['xiaomi'].getApiKey(),
-      this.authManagers['glm'].getApiKey(),
-      this.authManagers['groq'].getApiKey(),
-      this.authManagers['nvidia'].getApiKey(),
-      this.authManagers['omniroute'].getApiKey(),
-    ]);
-    return [
-      this.mkProviderItem('xiaomi',    Boolean(k1)),
-      this.mkProviderItem('glm',       Boolean(k2)),
-      this.mkProviderItem('groq',      Boolean(k3)),
-      this.mkProviderItem('nvidia',    Boolean(k4)),
-      this.mkProviderItem('omniroute', true, k5 ? '✓ Connected (Key)' : '✓ Connected (Local)'),
-    ];
+    const descriptors = this.registry.list();
+    const keys = await Promise.all(
+      descriptors.map(async (d) => Boolean(await this.registry.auth(d.id).getApiKey())),
+    );
+
+    const healths = await Promise.all(
+      descriptors.map(async (d) => {
+        try {
+          return this.registry.provider(d.id).health();
+        } catch {
+          return undefined; // lazy instantiation failures degrade to key-based status
+        }
+      }),
+    );
+
+    return descriptors.map((descriptor, index) => {
+      const hasKey = keys[index] ?? false;
+      const isOmni = descriptor.id === 'omniroute';
+      const health = healths[index];
+      const statusTxt = this.statusLabel(health, hasKey, isOmni);
+      const countTxt = descriptor.modelCountLabel === 'live' ? 'live' : `${descriptor.modelCountLabel} models`;
+      const degraded = health !== undefined && health.status !== 'connected' && health.status !== 'not-configured';
+      const healthyIcon = !degraded && (hasKey || isOmni);
+      const item = new vscode.TreeItem(descriptor.displayName, vscode.TreeItemCollapsibleState.None) as ProviderTreeItem;
+
+      item.providerId = descriptor.id;
+      item.contextValue = 'provider';
+      item.description = `${statusTxt}${health?.detail && degraded ? ` — ${health.detail}` : ''}  ·  ${countTxt}`;
+      item.iconPath = new vscode.ThemeIcon(
+        descriptor.treeIcon,
+        new vscode.ThemeColor(healthyIcon ? 'testing.iconPassed' : 'testing.iconFailed'),
+      );
+      item.tooltip = this.providerTooltip(
+        descriptor.displayName,
+        hasKey,
+        descriptor.modelCountLabel,
+        statusTxt,
+        health?.detail,
+      );
+      item.command = { command: 'copilot-amplify.provider.click', title: 'Open Provider', arguments: [item] };
+      return item;
+    });
   }
 
-  private mkProviderItem(id: string, hasKey: boolean, customStatus?: string): ProviderTreeItem {
-    const meta      = PROVIDER_META[id];
-    const statusTxt = customStatus ?? (hasKey ? '✓ Connected' : '⚠ Not configured');
-    const countTxt  = meta.modelCount === 'live' ? 'live' : `${meta.modelCount} models`;
-    const item      = new vscode.TreeItem(meta.brand, vscode.TreeItemCollapsibleState.None) as ProviderTreeItem;
-
-    item.providerId   = id;
-    item.contextValue = 'provider';
-    item.description  = `${statusTxt}  ·  ${countTxt}`;
-    item.iconPath     = new vscode.ThemeIcon(meta.icon, new vscode.ThemeColor(hasKey ? 'testing.iconPassed' : 'testing.iconFailed'));
-    item.tooltip      = this.providerTooltip(meta.brand, hasKey, meta.modelCount, customStatus);
-    item.command      = { command: 'copilot-amplify.provider.click', title: 'Open Provider', arguments: [item] };
-    return item;
+  /** Human-readable status line derived from live health when available. */
+  private statusLabel(health: ProviderHealth | undefined, hasKey: boolean, isOmni: boolean): string {
+    if (!health) {
+      return isOmni
+        ? hasKey ? '✓ Connected (Key)' : '○ Not configured (anonymous OK)'
+        : hasKey ? '✓ Connected' : '⚠ Not configured';
+    }
+    switch (health.status) {
+      case 'connected':
+        return isOmni && !hasKey ? '✓ Connected (anonymous)' : '✓ Connected';
+      case 'rate-limited':
+        return '⚠ Rate limited';
+      case 'auth-failed':
+        return '✗ Auth failed';
+      case 'error':
+        return '✗ Error';
+      case 'not-configured':
+      default:
+        return isOmni ? '○ Not configured (anonymous OK)' : '⚠ Not configured';
+    }
   }
 
-  private providerTooltip(brand: string, hasKey: boolean, modelCount: number | 'live', customStatus?: string): vscode.MarkdownString {
-    const statusMd = customStatus
-      ? `**Status:**  ${customStatus}`
-      : (hasKey ? '**Status:**  ✓ Connected' : '**Status:**  ⚠ Not configured');
+  private providerTooltip(brand: string, hasKey: boolean, modelCount: number | 'live', statusTxt?: string, detail?: string): vscode.MarkdownString {
+    const statusMd = statusTxt ?? (hasKey ? '**Status:**  ✓ Connected' : '**Status:**  ⚠ Not configured');
     const countMd = modelCount === 'live'
-      ? '**Models available:** Live (fetched from server)'
+      ? '**Models available:** Live (discovered from the server)'
       : `**Models available:** ${modelCount}`;
+    const detailMd = detail ? `\n**Detail:** ${detail}\n` : '\n';
     const md = new vscode.MarkdownString(
-      `### ${brand}\n\n${statusMd}\n${countMd}\n\nRight-click the row to set API key, test connection, or clear key.`,
+      `### ${brand}\n\n**Status:**  ${statusMd}\n${countMd}\n${detailMd}\nRight-click the row to set API key, test connection, or clear key.`,
     );
     md.isTrusted = true;
     return md;
@@ -230,51 +259,66 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   // ── MODELS section ─────────────────────────────────────────────────────────
 
   private getModelItems(): AnyTreeItem[] {
-    return Object.entries(PROVIDER_META).map(([id, meta]) => {
-      const countTxt = meta.modelCount === 'live' ? 'live (fetched)' : `${meta.modelCount} models`;
+    return this.registry.list().map((descriptor) => {
+      const countTxt = descriptor.modelCountLabel === 'live' ? 'live (cached)' : `${descriptor.modelCountLabel} models`;
       const header = new vscode.TreeItem(
-        `${meta.brand}  ·  ${countTxt}`,
+        `${descriptor.displayName}  ·  ${countTxt}`,
         vscode.TreeItemCollapsibleState.Collapsed,
       ) as ModelGroupTreeItem;
-      header.modelId      = id;
+      header.modelId = descriptor.id;
       header.contextValue = 'model-group';
-      header.iconPath     = new vscode.ThemeIcon(meta.icon);
-      header.description  = meta.modelCount === 'live'
-        ? 'Click to expand — fetched live from the local Omniroute server'
-        : `Click to see all ${meta.modelCount} models`;
-      header.tooltip      = new vscode.MarkdownString(
-        `**${meta.brand}** — ${countTxt}.\n\nClick to expand and see model IDs.`,
+      header.iconPath = new vscode.ThemeIcon(descriptor.treeIcon);
+      header.description = descriptor.modelCountLabel === 'live'
+        ? 'Cached models — use Refresh to re-discover'
+        : `Click to see all ${descriptor.modelCountLabel} models`;
+      header.tooltip = new vscode.MarkdownString(
+        `**${descriptor.displayName}** — ${countTxt}.\n\nClick to expand and see model IDs.`,
       );
       return header;
     });
   }
 
-  private async getModelsForProvider(providerId: string): Promise<ModelTreeItem[]> {
-    const models = await this.getModelListForProvider(providerId);
-    const meta   = PROVIDER_META[providerId];
-    if (!meta) { return []; }
+  private async getModelsForProvider(providerId: ProviderId): Promise<ModelTreeItem[]> {
+    let models: ProviderTreeModel[];
+    try {
+      models = await this.registry.provider(providerId).listModelsForTree();
+    } catch {
+      models = [];
+    }
+    const descriptor = this.registry.get(providerId);
+    if (!descriptor) { return []; }
+
+    if (models.length === 0 && descriptor.modelCountLabel === 'live') {
+      const hint = new vscode.TreeItem('No cached models yet — run "Refresh Providers & Models"', vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
+      hint.modelId = '';
+      hint.providerId = providerId;
+      hint.contextValue = 'model';
+      hint.iconPath = new vscode.ThemeIcon('info');
+      hint.description = '';
+      return [hint];
+    }
+
     return models.map((model) => {
       const item = new vscode.TreeItem(model.name, vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
-      item.modelId      = model.id;
-      item.providerId   = providerId;
+      item.modelId = model.id;
+      item.providerId = providerId;
       item.contextValue = 'model';
 
-      const isError = model.id === 'error';
       const isSelected = this.activeProviderId === providerId && this.activeModelId === model.id;
       const isVision = Boolean(model.capabilities?.imageInput);
       const isTools = Boolean(model.capabilities?.toolCalling);
-      const isReasoning = /reason|think|qwq|deepseek-r1|r1|cogito|glm-5/i.test(model.id);
+      const isReasoning = model.supportsReasoning === true;
 
       const badges: string[] = [];
       if (isVision) { badges.push('Vision'); }
       if (isTools) { badges.push('Tools'); }
       if (isReasoning) { badges.push('Reasoning'); }
 
-      item.iconPath     = new vscode.ThemeIcon(
-        isError ? 'warning' : isSelected ? 'check' : isReasoning ? 'sparkle' : isVision ? 'eye' : 'symbol-method',
-        isSelected ? new vscode.ThemeColor('testing.iconPassed') : undefined
+      item.iconPath = new vscode.ThemeIcon(
+        isSelected ? 'check' : isReasoning ? 'sparkle' : isVision ? 'eye' : 'symbol-method',
+        isSelected ? new vscode.ThemeColor('testing.iconPassed') : undefined,
       );
-      item.description  = badges.length > 0
+      item.description = badges.length > 0
         ? `${model.id}  [${badges.join(', ')}]${isSelected ? '  ✓ Active' : ''}`
         : `${model.id}${isSelected ? '  ✓ Active' : ''}`;
 
@@ -282,10 +326,10 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
         ? `\n\n**Max Input:** ${model.maxInputTokens.toLocaleString()} tokens\n**Max Output:** ${(model.maxOutputTokens || 8192).toLocaleString()} tokens`
         : '';
 
-      item.tooltip      = new vscode.MarkdownString(
-        `**${model.name}**\n\nModel ID: \`${model.id}\`\nProvider: ${meta.brand}${badges.length > 0 ? `\nCapabilities: ${badges.join(', ')}` : ''}${limitsInfo}\n\nRight-click to pin this model.`,
+      item.tooltip = new vscode.MarkdownString(
+        `**${model.name}**\n\nModel ID: \`${model.id}\`\nProvider: ${descriptor.displayName}${badges.length > 0 ? `\nCapabilities: ${badges.join(', ')}` : ''}${limitsInfo}\n\nRight-click to pin this model.`,
       );
-      item.command      = {
+      item.command = {
         command: 'copilot-amplify.selectModel',
         title: 'Select Model',
         arguments: [item],
@@ -294,42 +338,16 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     });
   }
 
-  private async getModelListForProvider(providerId: string): Promise<Array<{ id: string; name: string; capabilities?: { imageInput?: boolean; toolCalling?: boolean | number }; maxInputTokens?: number; maxOutputTokens?: number }>> {
-    switch (providerId) {
-      case 'xiaomi':    return MIMO_MODELS;
-      case 'glm':       return GLM_MODELS;
-      case 'groq':      return GROQ_MODELS;
-      case 'nvidia':    return NIM_MODELS;
-      case 'omniroute': {
-        try {
-          const apiKey = (await this.authManagers['omniroute'].getApiKey()) || 'omniroute';
-          const live = await fetchOmnirouteModels(apiKey);
-          return live.map((m) => ({
-            id: decodeOmnirouteModelId(m.id),
-            name: m.name ?? decodeOmnirouteModelId(m.id),
-            capabilities: m.capabilities,
-            maxInputTokens: m.maxInputTokens,
-            maxOutputTokens: m.maxOutputTokens,
-          }));
-        } catch (err) {
-          const details = err instanceof Error ? err.message : String(err);
-          return [{ id: 'error', name: `Server unreachable (${details})` }];
-        }
-      }
-      default:          return [];
-    }
-  }
-
   // ── ACTIONS section ─────────────────────────────────────────────────────────
 
   private getActionItems(): ActionTreeItem[] {
     return ACTIONS.map((a) => {
       const item = new vscode.TreeItem(a.label, vscode.TreeItemCollapsibleState.None) as ActionTreeItem;
-      item.actionId     = a.id;
+      item.actionId = a.id;
       item.contextValue = 'action';
-      item.iconPath     = new vscode.ThemeIcon(a.icon);
-      item.tooltip      = 'Open a dialog to manage any provider';
-      item.command      = { command: a.command, title: a.label };
+      item.iconPath = new vscode.ThemeIcon(a.icon);
+      item.tooltip = a.label;
+      item.command = { command: a.command, title: a.label };
       return item;
     });
   }
@@ -343,9 +361,9 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.Expanded,
     ) as SectionTreeItem;
-    item.sectionId    = sectionId;
+    item.sectionId = sectionId;
     item.contextValue = 'section';
-    item.iconPath     = new vscode.ThemeIcon(icon);
+    item.iconPath = new vscode.ThemeIcon(icon);
     return item;
   }
 }

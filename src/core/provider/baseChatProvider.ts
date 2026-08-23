@@ -1,12 +1,17 @@
-// Moved ConfigurableChatProvider to bottom
+// Base chat provider: shared Language Model API implementation.
+// Provider-specific subclasses only supply configuration + hooks.
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions/completions';
 import * as vscode from 'vscode';
-import { ApiError, GenericApiClient, type ReasoningEffort, type ThinkingOption } from './baseApi';
-import type { BaseAuthManager } from './baseAuth';
-import { convertMessages, convertTools, parseToolArguments } from './converter';
-import { type ThinkingState, processThinkingContent } from './thinking';
-import { prepareContextMessages, estimateMessageTokens } from './contextManager';
-import { executeWithRetry } from './retryHandler';
+import { ApiError, GenericApiClient, type ReasoningEffort, type ThinkingOption } from '../api/client';
+import type { BaseAuthManager } from '../auth/authManager';
+import { convertMessages, convertTools, parseToolArguments } from '../context/converter';
+import { type ThinkingState, processThinkingContent } from '../thinking/thinking';
+import { prepareContextMessages, estimateMessageTokens } from '../context/contextManager';
+import { executeWithRetry } from '../retry/retryHandler';
+import { CircuitBreaker, type CircuitState } from '../resilience/circuitBreaker';
+import { AVAILABILITY_HINTS, classifyAvailability } from '../resilience/saturation';
+import { AuthenticationError, isCancellation } from '../errors';
+import { logger } from '../logging/logger';
 
 interface ToolCallBuilder {
   id: string;
@@ -14,7 +19,52 @@ interface ToolCallBuilder {
   arguments: string;
 }
 
+/** Outcome of the most recent chat request, for health()/diagnostics. */
+export interface ProviderRequestOutcome {
+  ok: boolean;
+  /** HTTP status when the failure came from an API response. */
+  statusCode?: number;
+  /** Failure classification; absent for successful requests. */
+  category?:
+    | 'saturated'
+    | 'rate-limited'
+    | 'maintenance'
+    | 'unavailable'
+    | 'auth-failed'
+    | 'error';
+  at: number;
+}
 
+function outcomeFromError(error: unknown): Omit<ProviderRequestOutcome, 'at'> {
+  if (error instanceof ApiError) {
+    const category =
+      classifyAvailability(error) ??
+      (error.statusCode === 401 || error.statusCode === 403
+        ? 'auth-failed'
+        : error.statusCode === 429
+          ? 'rate-limited'
+          : 'error');
+    return { ok: false, statusCode: error.statusCode > 0 ? error.statusCode : undefined, category };
+  }
+  return { ok: false, category: 'error' };
+}
+
+function readCircuitBreakerOptions(): {
+  failureThreshold?: number;
+  resetTimeoutMs?: number;
+  enabled?: boolean;
+} {
+  try {
+    const cfg = vscode.workspace.getConfiguration('copilot-amplify.circuitBreaker');
+    return {
+      failureThreshold: cfg.get<number>('failureThreshold', 5),
+      resetTimeoutMs: cfg.get<number>('resetTimeoutSeconds', 30) * 1000,
+      enabled: cfg.get<boolean>('enabled', true),
+    };
+  } catch {
+    return {};
+  }
+}
 
 type LanguageModelThinkingPartCtor = new (
   value: string | string[],
@@ -69,6 +119,12 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   private readonly changeEmitter = new vscode.EventEmitter<void>();
   readonly onDidChangeLanguageModelChatInformation: vscode.Event<void> = this.changeEmitter.event;
 
+  private _log?: ReturnType<typeof logger.child>;
+  /** Lazily-bound logger; deferred so subclass display names are available. */
+  protected get log(): ReturnType<typeof logger.child> {
+    return (this._log ??= logger.child({ provider: this.providerDisplayName }));
+  }
+
   /**
    * Subclasses call this after their internal model list changes (for
    * example after a dynamic model discovery fetch completes) so VS Code
@@ -79,6 +135,45 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   }
 
   private clientCache = new Map<string, GenericApiClient>();
+  private _breaker?: CircuitBreaker;
+  private lastRequestOutcome?: ProviderRequestOutcome;
+
+  /**
+   * Per-provider circuit breaker guarding chat requests.
+   * Lazy because `providerDisplayName` only exists after subclass construction.
+   */
+  protected get breaker(): CircuitBreaker {
+    return (this._breaker ??= new CircuitBreaker(this.providerDisplayName, readCircuitBreakerOptions()));
+  }
+
+  /** Most recent chat-request outcome (for health/diagnostics consumers). */
+  getLatestRequestOutcome(): ProviderRequestOutcome | undefined {
+    return this.lastRequestOutcome;
+  }
+
+  /** Current circuit-breaker state (for diagnostics rendering). */
+  getCircuitState(): CircuitState {
+    return this.breaker.currentState;
+  }
+
+  /**
+   * Run one chat operation under retry + circuit-breaker protection and
+   * record the outcome for health reporting. The final error is rethrown.
+   */
+  protected async runChatOperation(
+    operation: () => Promise<void>,
+    token?: vscode.CancellationToken,
+  ): Promise<void> {
+    try {
+      await executeWithRetry(() => this.breaker.execute(operation), token);
+      this.lastRequestOutcome = { ok: true, at: Date.now() };
+    } catch (error) {
+      if (!isCancellation(error) && !token?.isCancellationRequested) {
+        this.lastRequestOutcome = { ...outcomeFromError(error), at: Date.now() };
+      }
+      throw error;
+    }
+  }
 
   protected mapModelId(modelId: string): string {
     return modelId;
@@ -166,6 +261,13 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     let client = this.clientCache.get(apiKey);
     if (!client) {
       client = this.getApiClient(apiKey);
+      // Bound the cache: keys change rarely, so a small LRU-style bound is safe.
+      if (this.clientCache.size >= 8) {
+        const oldest = this.clientCache.keys().next();
+        if (!oldest.done) {
+          this.clientCache.delete(oldest.value);
+        }
+      }
       this.clientCache.set(apiKey, client);
     }
     return client;
@@ -175,7 +277,9 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     options: vscode.PrepareLanguageModelChatModelOptions,
     token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelChatInformation[]> {
-    void token;
+    if (token.isCancellationRequested) {
+      return [];
+    }
 
     const apiKey = await this.authManager.getApiKey();
     if (apiKey) {
@@ -207,18 +311,15 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     }
 
     try {
-      await executeWithRetry(
-        () =>
-          this.streamResponse(
-            this.getOrCreateClient(apiKey),
-            model,
-            messages,
-            options,
-            progress,
-            token,
-          ),
-        token,
-      );
+      await this.runChatOperation(() =>
+        this.streamResponse(
+          this.getOrCreateClient(apiKey),
+          model,
+          messages,
+          options,
+          progress,
+          token,
+        ), token);
     } catch (error) {
       if (token.isCancellationRequested || (error instanceof Error && error.name === 'CancelledError')) {
         return;
@@ -259,6 +360,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     let thinkingState: ThinkingState = { buffer: '', insideThinking: false };
     let structuredReasoningActive = false;
     let hasReportedAnyPart = false;
+    let streamError: unknown;
 
     const maxTokensOption = getNumberModelOption(options, 'maxTokens');
     const preparedMessages = prepareContextMessages(
@@ -272,89 +374,99 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
 
     const startTime = Date.now();
     let ttft: number | undefined;
-    let tokenCount = 0;
+    let chunkCount = 0;
 
-    const stream = client.streamChat(
-      this.mapModelId(model.id),
-      preparedMessages,
-      {
-        maxTokens: maxTokensOption,
-        tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
-        toolChoice:
-          model.capabilities.toolCalling && options.tools?.length
-            ? options.toolMode === vscode.LanguageModelChatToolMode.Required
-              ? 'required'
-              : 'auto'
-            : undefined,
-        thinking: this.getThinkingOption(model.id, options),
-        reasoningEffort: this.getReasoningEffort(model.id, options),
-        extraBody: this.getExtraBody(model.id),
-      },
-      token,
-    );
+    try {
+      const stream = client.streamChat(
+        this.mapModelId(model.id),
+        preparedMessages,
+        {
+          maxTokens: maxTokensOption,
+          tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
+          toolChoice:
+            model.capabilities.toolCalling && options.tools?.length
+              ? options.toolMode === vscode.LanguageModelChatToolMode.Required
+                ? 'required'
+                : 'auto'
+              : undefined,
+          thinking: this.getThinkingOption(model.id, options),
+          reasoningEffort: this.getReasoningEffort(model.id, options),
+          extraBody: this.getExtraBody(model.id),
+        },
+        token,
+      );
 
-    for await (const chunk of stream) {
-      if (token.isCancellationRequested) {
-        break;
-      }
+      for await (const chunk of stream) {
+        if (token.isCancellationRequested) {
+          break;
+        }
 
-      if (!chunk.choices || !Array.isArray(chunk.choices)) {
-        continue;
-      }
-
-      for (const choice of chunk.choices) {
-        if (!choice.delta) {
+        if (!chunk.choices || !Array.isArray(chunk.choices)) {
           continue;
         }
 
-        const delta = choice.delta as Record<string, unknown>;
-        const reasoning = typeof delta.reasoning_content === 'string' ? delta.reasoning_content
-          : typeof delta.reasoning === 'string' ? delta.reasoning
-          : typeof delta.thought === 'string' ? delta.thought
-          : typeof delta.thinking === 'string' ? delta.thinking
-          : typeof delta.reasoning_text === 'string' ? delta.reasoning_text
-          : undefined;
+        for (const choice of chunk.choices) {
+          if (!choice.delta) {
+            continue;
+          }
 
-        if (reasoning) {
-          if (ttft === undefined) {
-            ttft = Date.now() - startTime;
-          }
-          this.reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
-          structuredReasoningActive = true;
-          hasReportedAnyPart = true;
-        }
+          const delta = choice.delta as Record<string, unknown>;
+          const reasoning = typeof delta.reasoning_content === 'string' ? delta.reasoning_content
+            : typeof delta.reasoning === 'string' ? delta.reasoning
+            : typeof delta.thought === 'string' ? delta.thought
+            : typeof delta.thinking === 'string' ? delta.thinking
+            : typeof delta.reasoning_text === 'string' ? delta.reasoning_text
+            : undefined;
 
-        const content = typeof choice.delta.content === 'string' ? choice.delta.content
-          : typeof delta.text === 'string' ? delta.text
-          : undefined;
+          if (reasoning) {
+            if (ttft === undefined) {
+              ttft = Date.now() - startTime;
+            }
+            this.reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
+            structuredReasoningActive = true;
+            hasReportedAnyPart = true;
+          }
 
-        if (content) {
-          if (ttft === undefined) {
-            ttft = Date.now() - startTime;
-          }
-          if (structuredReasoningActive) {
-            this.closeStructuredReasoning(progress);
-            structuredReasoningActive = false;
-          }
-          const result = processThinkingContent(content, thinkingState);
-          thinkingState = result.state;
-          if (result.output) {
-            progress.report(new vscode.LanguageModelTextPart(result.output));
-            tokenCount++;
-          }
-          hasReportedAnyPart = true;
-        }
+          const content = typeof choice.delta.content === 'string' ? choice.delta.content
+            : typeof delta.text === 'string' ? delta.text
+            : undefined;
 
-        this.collectToolCalls(choice.delta.tool_calls, toolCallBuilders);
-        if (choice.finish_reason === 'tool_calls') {
-          if (structuredReasoningActive) {
-            this.closeStructuredReasoning(progress);
-            structuredReasoningActive = false;
+          if (content) {
+            if (ttft === undefined) {
+              ttft = Date.now() - startTime;
+            }
+            if (structuredReasoningActive) {
+              this.closeStructuredReasoning(progress);
+              structuredReasoningActive = false;
+            }
+            const result = processThinkingContent(content, thinkingState);
+            thinkingState = result.state;
+            if (result.output) {
+              progress.report(new vscode.LanguageModelTextPart(result.output));
+              chunkCount++;
+            }
+            hasReportedAnyPart = true;
           }
-          this.reportToolCalls(progress, toolCallBuilders);
-          hasReportedAnyPart = true;
+
+          this.collectToolCalls(choice.delta.tool_calls, toolCallBuilders);
+          if (choice.finish_reason === 'tool_calls') {
+            if (structuredReasoningActive) {
+              this.closeStructuredReasoning(progress);
+              structuredReasoningActive = false;
+            }
+            this.reportToolCalls(progress, toolCallBuilders);
+            hasReportedAnyPart = true;
+          }
         }
       }
+    } catch (error) {
+      // If we already reported some content, re-throw — the user saw partial output.
+      // If nothing was reported yet, capture the error and try the non-streaming fallback.
+      if (hasReportedAnyPart || token.isCancellationRequested) {
+        throw error;
+      }
+      streamError = error;
+      this.log.warn('stream failed before producing output', { error: error instanceof Error ? error.message : String(error) });
     }
 
     if (thinkingState.buffer.length > 0) {
@@ -368,26 +480,36 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
 
     this.reportToolCalls(progress, toolCallBuilders);
 
-    const totalTimeSec = (Date.now() - startTime) / 1000;
-    const tps = totalTimeSec > 0 ? (tokenCount / totalTimeSec).toFixed(1) : '0';
-    console.log(
-      `[${this.providerDisplayName}] Stream complete (${model.id}): TTFT=${ttft ?? 0}ms, Tokens=${tokenCount}, Speed=${tps} tok/s`
-    );
+    this.log.info('stream complete', {
+      model: model.id,
+      ttftMs: ttft ?? 0,
+      chunks: chunkCount,
+      totalMs: Date.now() - startTime,
+    });
 
     if (!hasReportedAnyPart && !token.isCancellationRequested) {
-      console.warn(`[${this.providerDisplayName}] Streaming yielded no parts. Retrying with non-streaming completion...`);
-      const fallbackContent = await client.chatNonStreaming(
-        this.mapModelId(model.id),
-        preparedMessages,
-        {
-          maxTokens: maxTokensOption,
-          tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
-          extraBody: this.getExtraBody(model.id),
-        },
-      );
+      this.log.warn('streaming yielded no parts; retrying via non-streaming completion');
+      try {
+        const fallbackContent = await client.chatNonStreaming(
+          this.mapModelId(model.id),
+          preparedMessages,
+          {
+            maxTokens: maxTokensOption,
+            tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
+            extraBody: this.getExtraBody(model.id),
+          },
+          token,
+        );
 
-      if (fallbackContent && fallbackContent.trim().length > 0) {
-        progress.report(new vscode.LanguageModelTextPart(fallbackContent));
+        if (fallbackContent && fallbackContent.trim().length > 0) {
+          progress.report(new vscode.LanguageModelTextPart(fallbackContent));
+        }
+      } catch (fallbackError) {
+        this.log.warn('non-streaming fallback also failed', {
+          error: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+        });
+        // Re-throw the original stream error if we have one, otherwise the fallback error
+        throw streamError ?? fallbackError;
       }
     }
   }
@@ -482,18 +604,38 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     throw error;
   }
 
+  /**
+   * Map a low-level API failure into an actionable user-facing message.
+   * Stored credentials are NEVER deleted here (a transient gateway 401 must
+   * not wipe a valid key); the user is told how to update it instead.
+   */
   protected throwMappedError(error: unknown): never {
     if (!(error instanceof ApiError)) {
       throw error;
     }
 
-    if (error.statusCode === 401) {
-      void this.authManager.deleteApiKey();
+    if (error.statusCode === 401 || error.statusCode === 403) {
+      this.throwUserError(
+        `${this.providerDisplayName} authentication failed (${error.statusCode}). The stored API key may be invalid or expired.\n\nRun "Copilot Amplify: Manage Providers..." → Set API Key to update it.`,
+      );
     }
 
     const message =
       this.errorMessages[error.statusCode] ?? `${this.providerDisplayName} API error: ${error.message}`;
-    this.throwUserError(message);
+    // Surface *why* a 503/529 happened when the response body says so — a
+    // saturated upstream queue reads very differently from maintenance.
+    const availability = classifyAvailability(error);
+    const hint =
+      availability && availability !== 'unavailable' ? `\n\n${AVAILABILITY_HINTS[availability]}` : '';
+    this.throwUserError(`${message}${hint}`);
+  }
+
+  /** Shared authentication-failure constructor for subclass use. */
+  protected authenticationError(detail?: string): AuthenticationError {
+    return new AuthenticationError(
+      `${this.providerDisplayName} authentication failed.${detail ? ` ${detail}` : ''}`,
+      { statusCode: 401 },
+    );
   }
 }
 

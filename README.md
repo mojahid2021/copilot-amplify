@@ -1,148 +1,332 @@
-<!-- markdownlint-disable MD033 -->
+<div align="center">
 
-<h1 align="center">🤖 Copilot Amplify</h1>
+<img src="icon.png" alt="Copilot Amplify logo" width="128" />
 
-<p align="center">
-  <strong>Extend GitHub Copilot Chat with additional AI model providers</strong>
-</p>
+# Copilot Amplify
 
-<p align="center">
-  <a href="https://marketplace.visualstudio.com/items?itemName=LuneCode.copilot-amplify"><img src="https://vsmarketplacebadges.dev/version/LuneCode.copilot-amplify.png" alt="VS Marketplace Version"></a>
-  <a href="https://marketplace.visualstudio.com/items?itemName=LuneCode.copilot-amplify"><img src="https://vsmarketplacebadges.dev/downloads/LuneCode.copilot-amplify.png" alt="VS Marketplace Downloads"></a>
-  <br>
-  <a href="https://github.com/mojahid2021/copilot-amplify"><img src="https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white" alt="GitHub"></a>
-  <a href="https://github.com/mojahid2021/copilot-amplify/stargazers"><img src="https://img.shields.io/github/stars/mojahid2021/copilot-amplify?logo=github" alt="GitHub Stars"></a>
-  <a href="https://github.com/mojahid2021/copilot-amplify/blob/main/LICENSE"><img src="https://img.shields.io/github/license/mojahid2021/copilot-amplify?style=flat" alt="License"></a>
-  <a href="https://www.paypal.com/donate?hosted_button_id=MZQS5CZ68NGEW"><img src="https://img.shields.io/badge/Donate-PayPal-00457C?logo=paypal&logoColor=white" alt="Donate"></a>
-</p>
+**Extend GitHub Copilot Chat with the AI providers *you* choose.**
+
+Xiaomi MiMo · Z.ai GLM · Groq · NVIDIA NIM · OmniRoute — all first-class,
+equal siblings inside the VS Code Language Model API.
+
+[![Version](https://img.shields.io/badge/version-2.1.0-blue)](CHANGELOG.md)
+[![VS Code](https://img.shields.io/badge/VS_Code-%E2%89%A51.125-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com/)
+[![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen)](#-development)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#-development)
+[![License](https://img.shields.io/badge/license-ISC-yellow)](LICENSE)
+
+[Install](#-installation) · [Quick Start](#-quick-start) · [Configuration](#%EF%B8%8F-configuration) · [Contributing](#-contributing)
+
+</div>
 
 ---
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/mojahid2021/copilot-amplify/main/icon.png" alt="Copilot Amplify Icon" style="width: 128px; border-radius: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.2);">
-</p>
+## ✨ Why Copilot Amplify?
 
-## ✨ Features
+GitHub Copilot Chat is great — but you're limited to GitHub's model catalog.
+Copilot Amplify opens it up:
 
-- **Xiaomi MiMo**: Integration for Xiaomi's AI models directly in your chat. Automatically supports both Pay-as-you-go (`sk-...`) and Token Plan (`tp-...`) API keys and routes to the correct endpoints.
-- **Z.ai (GLM)**: Support for Z.ai GLM-4 and GLM-5 models.
-- **NVIDIA NIM**: OpenAI-compatible support for models from the NVIDIA API Catalog.
-- **Omniroute**: Local OpenAI-compatible aggregator with dynamic model discovery, routing combos, semantic-cache/memory/compression headers, session tagging and cost telemetry.
-- **Native Integration**: Works seamlessly with the VS Code `LanguageModelChat` API.
-- **Advanced Capabilities**: Supports streaming responses, tool calling, and thinking block rendering.
-- **Secure Key Storage**: No leaked keys! We use VS Code's built-in Secret Storage for your API keys.
-- **Connectivity Testing**: Built-in commands to verify your setup works correctly.
-
-## 📖 Available Models
-
-### Xiaomi
-
-| Model | Context Window | Max Output | Image Input | Tool Calling |
-|---|---|---|---|---|
-| **MiMo-V2-Pro** | 1,048,576 | 131,072 | No | Yes |
-| **MiMo-V2-Flash** | 262,144 | 131,072 | No | Yes |
-| **MiMo-V2-Omni** | 262,144 | 131,072 | Yes | Yes |
-
-### Z.AI
-
-| Model | Context Window | Max Output | Image Input | Tool Calling |
-|---|---|---|---|---|
-| **GLM-5.1** | 204,800 | 131,072 | No | Yes |
-| **GLM-5V-Turbo** | 204,800 | 131,072 | Yes | Yes |
-| **GLM-5 Turbo** | 204,800 | 131,072 | No | Yes |
-| **GLM-5** | 204,800 | 131,072 | No | Yes |
-| **GLM-4.7** | 204,800 | 131,072 | No | Yes |
-| **GLM-4.7 Flash** | 204,800 | 131,072 | No | Yes |
-| **GLM-4.6** | 204,800 | 131,072 | No | Yes |
-| **GLM-4.5** | 131,072 | 98,304 | No | Yes |
-| **GLM-4.5 Air** | 131,072 | 98,304 | No | Yes |
-
-### NVIDIA NIM
-
-| Model | Context Window | Max Output | Image Input | Tool Calling |
-|---|---|---|---|---|
-| **Gemma 4 31B IT** (`google/gemma-4-31b-it`) | 262,144 | 8,192 | Yes | Yes |
-| **Nemotron 3 Ultra 550B** (`nvidia/nemotron-3-ultra-550b-a55b`) | 1,048,576 | 16,384 | No | Yes |
-| **Nemotron 3 Super 120B** (`nvidia/nemotron-3-super-120b-a12b`) | 1,048,576 | 16,384 | No | Yes |
-| **DeepSeek V4 Flash** (`deepseek-ai/deepseek-v4-flash`) | 1,048,576 | 16,384 | No | Yes |
-| **MiniMax M3** (`minimaxai/minimax-m3`) | 1,048,576 | 16,384 | Yes | Yes |
-| **Step 3.5 Flash** (`stepfun-ai/step-3.5-flash`) | 262,144 | 16,384 | No | Yes |
-| **GLM-5.2** (`z-ai/glm-5.2`) | 1,000,000 | 16,384 | No | Yes |
-| **Devstral 2 123B Instruct** (`mistralai/devstral-2-123b-instruct-2512`) | 262,144 | 16,384 | No | Yes |
-| **Kimi K2.6** (`moonshotai/kimi-k2.6`) | 262,144 | 16,384 | Yes | Yes |
-| **Qwen3 Coder 480B** (`qwen/qwen3-coder-480b-a35b-instruct`) | 262,144 | 16,384 | No | Yes |
-| **Magistral Small 2506** (`mistralai/magistral-small-2506`) | 131,072 | 16,384 | No | No |
-| **Granite 3.3 8B Instruct** (`ibm/granite-3.3-8b-instruct`) | 131,072 | 8,192 | No | Yes |
-| **QwQ 32B** (`qwen/qwq-32b`) | 131,072 | 32,768 | No | No |
-| **Falcon 3 7B Instruct** (`tiiuae/falcon3-7b-instruct`) | 32,768 | 8,192 | No | No |
-
-### Omniroute (local aggregator)
-
-Omniroute is a local OpenAI-compatible aggregator that routes requests to the
-best upstream provider for each model (combos like `auto/best-coding`) and adds
-semantic caching, memory, compression and cost attribution. Copilot Amplify
-discovers the live model list from `GET /v1/models` each time, so every combo
-and provider-prefixed model on your server appears in the Copilot Chat picker.
-
-| Feature | Notes |
+| | |
 |---|---|
-| Dynamic model discovery | Live list from the server (cached 5 min, configurable) |
-| Slash-id encoding | `auto/best-coding` ⇄ `auto__best-coding` so IDs survive the Copilot picker |
-| Thinking support | Reasoning models stream reasoning; no-thinking Claude variants resolve to the real model with reasoning suppressed |
-| Cache / memory / compression headers | `X-OmniRoute-No-Cache`, `x-omniroute-no-memory`, `x-omniroute-compression` driven by settings |
-| Session tagging | `X-OmniRoute-Session-Id` per chat conversation (feeds memory + `call_logs.session_tag`) |
-| Cost telemetry | Routing decision, provider, latency, tokens, cost and cache savings logged to the `Omniroute` output channel |
+| 🔌 **Bring your own provider** | Xiaomi MiMo, Z.ai GLM, Groq, NVIDIA NIM, and OmniRoute work out of the box |
+| ⚖️ **No privileged provider** | Every provider is an equal sibling — no hidden routing, no forced hierarchy |
+| 🔐 **Secrets done right** | API keys live in VS Code SecretStorage (OS keychain), never in `settings.json` or logs |
+| 🧠 **Full AI capability surface** | Streaming, tool calling, reasoning/thinking output, vision input, system prompts |
+| 🛡️ **Production-grade reliability** | Retries with `Retry-After`, per-provider circuit breakers, timeouts everywhere, saturation-aware errors |
+| 🌊 **Live model catalogs** | OmniRoute discovers models from your server at runtime — new models appear without updating the extension |
+| 👁️ **Observable** | Unified diagnostics, per-request telemetry logs, live health states in the tree view |
 
-**Setup** — set the Omniroute API key via the Providers panel (or the
-`copilot-amplify.omniroute.apiKey` setting). If your server runs elsewhere, set
-`copilot-amplify.omniroute.baseUrl` (default `http://localhost:20128/v1`).
+> **OmniRoute is a provider, not a middleman.** Its internal multi-provider
+> routing lives entirely on the OmniRoute server; this extension only ever
+> talks to your configured base URL — exactly like any other vendor endpoint.
 
-**Settings** (`copilot-amplify.omniroute.*`):
+## 🗺️ Contents
 
-- `baseUrl` — server URL including `/v1` (default `http://localhost:20128/v1`).
-- `noCache` — send `X-OmniRoute-No-Cache: true` (default `false`, caching on).
-- `noMemory` — send `x-omniroute-no-memory: true` to skip memory + skills
-  injection (default `true` to avoid per-call token/cost overhead; set `false`
-  together with a stable `sessionId` to use OmniRoute memory).
-- `compression` — per-request compression override (`off`, `default`,
-  `engine:<id>`, or a combo id).
-- `sessionId` — fixed session tag sent via `X-OmniRoute-Session-Id` (empty =
-  one generated per chat conversation).
-- `progress` — send `X-OmniRoute-Progress: true` for progress events.
-- `modelCacheTtlSeconds` — model-list cache TTL (default `300`).
-- `logTelemetry` — log response cost/routing headers (default `true`).
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+- [Supported Providers](#-supported-providers)
+- [Architecture](#%EF%B8%8F-architecture)
+- [Configuration](#%EF%B8%8F-configuration)
+- [Commands](#-commands)
+- [Reliability](#%EF%B8%8F-reliability)
+- [Security](#-security)
+- [Troubleshooting](#-troubleshooting)
+- [Development](#-development)
+- [Contributing](#-contributing)
+- [Documentation](#-documentation)
+- [License](#-license)
 
-**Telemetry** — run **Copilot Amplify: Show Omniroute Telemetry** (or check the
-`Omniroute` output channel) to see `model`, `provider`, `route`, `latency_ms`,
-`tokens_in/out`, `cost_usd`, `cache`/`cache_hit`/`cost_saved_usd` for every
-request.
+## 📦 Installation
 
-## 🚀 Usage
+**Option A — build from source**
 
-1. **Install** the extension from the VS Code Marketplace or Open VSX.
-2. Open your **Language Models** panel in VS Code.
-3. Click **Add Provider** and select **Xiaomi**, **Z.ai**, or **NVIDIA NIM**.
-4. Enter your API key when prompted.
-5. You can now select models from these providers in GitHub Copilot Chat.
+```bash
+git clone https://github.com/mojahid2021/copilot-amplify.git
+cd copilot-amplify
+npm install
+npm run compile
+```
 
-> Note: VS Code currently exposes extension-contributed language model providers to users on individual GitHub Copilot plans.
+Then press <kbd>F5</kbd> in VS Code to launch an Extension Development Host.
 
-## ⚙️ Commands
+**Option B — packaged VSIX**
 
-- `copilot-amplify.xiaomi.manage`: Manage Xiaomi provider (set/clear API key, test connection).
-- `copilot-amplify.glm.manage`: Manage Z.ai (GLM) provider (set/clear API key, test connection).
-- `copilot-amplify.nvidia.manage`: Manage NVIDIA NIM provider (set/clear API key, test connection).
-- `copilot-amplify.omniroute.manage`: Manage Omniroute provider (set/clear API key, test connection).
-- `copilot-amplify.omniroute.showTelemetry`: Show the Omniroute telemetry output channel (routing, latency, tokens, cost, cache).
+```bash
+npm install && npm run package   # → copilot-amplify-<version>.vsix
+```
 
-## 🔒 Security & Privacy
+Install via `Extensions: Install from VSIX…`.
 
-- **Local Processing**: The extension acts as a bridge between VS Code and the provider APIs.
-- **No Mid-man**: Your requests go directly to the provider endpoints.
-- **Encrypted Keys**: API keys are stored in the OS-level keychain via VS Code.
+> Requires **VS Code ≥ 1.125** and an active GitHub Copilot subscription
+> (the extension extends Copilot Chat's Language Model API).
 
----
+## 🚀 Quick Start
 
-<p align="center">
-  <strong>🙏 Thank you for using Copilot Amplify!</strong>
-</p>
+1. **Open the panel** — click the Copilot Amplify icon in the activity bar.
+2. **Add a key** — click the 🔑 icon on any provider row and paste your API key. It goes straight into your OS keychain.
+3. **Pick a model** — open Copilot Chat's model picker and choose e.g. *Z.ai · Glm 5.2*.
+4. **Chat.** That's it.
+
+No `settings.json` edits required. Full walkthrough with copy-paste recipes:
+**[`docs/usage-examples.md`](docs/usage-examples.md)**
+
+## 🔌 Supported Providers
+
+| Provider | Catalog | Highlights |
+|---|---|---|
+| **Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
+| **Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
+| **Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
+| **NVIDIA NIM** | Static (17 models) | Broad open-model catalog with transparent ID mapping |
+| **OmniRoute** | 🔄 Dynamic | Discovers models live from `GET /models`; custom chat endpoints supported; anonymous local operation |
+
+Capabilities shown in the picker are **truthful by design** — a model is only
+advertised with vision/tools/reasoning if it actually supports them.
+
+## 🏗️ Architecture
+
+```text
+VS Code
+    │
+    ▼
+VS Code Language Model API
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│          Copilot Amplify Core           │
+│                                         │
+│  Provider Registry   Model Catalogs     │
+│  Authentication      HTTP Transport     │
+│  Streaming / SSE     Retry / Timeout    │
+│  Circuit Breaker     Error Taxonomy     │
+│  Context / Converter Thinking / Tools   │
+│  Logging / Redaction Diagnostics        │
+└────────────────────┬────────────────────┘
+                     │
+              Provider Registry
+                     │
+   ┌────────┬────────┼────────┬───────────┐
+   ▼        ▼        ▼        ▼           ▼
+ Xiaomi    Z.ai     Groq     NVIDIA    OmniRoute
+ Provider  Provider Provider Provider  Provider
+   │         │        │         │           │
+   ▼         ▼        ▼         ▼           ▼
+ MiMo API  Z.ai API Groq API NVIDIA NIM OmniRoute Server
+                                                 │
+                                     ┌───────────┼───────────┐
+                                     ▼           ▼           ▼
+                                 Provider A  Provider B  Provider C
+```
+
+Adding a provider means adding one descriptor module + tests — no core changes.
+See **[docs/adding-a-provider.md](docs/adding-a-provider.md)** for the full guide.
+
+<details>
+<summary><strong>Project layout</strong></summary>
+
+```text
+src/
+├── core/
+│   ├── api/            # GenericApiClient (OpenAI SDK), shared SSE parser
+│   ├── auth/           # SecretStorage-backed BaseAuthManager
+│   ├── context/        # LM↔wire converters, token estimation & truncation
+│   ├── errors/         # Normalized error taxonomy + HTTP mapping
+│   ├── logging/        # OutputChannel logger with secret redaction
+│   ├── models/         # Static model catalogs per fixed-catalog provider
+│   ├── provider/       # BaseChatProvider + ProviderRegistry
+│   ├── resilience/     # TTLCache (coalescing), CircuitBreaker, saturation classifier
+│   ├── retry/          # Backoff, jitter, Retry-After, cancellation
+│   ├── thinking/       # <think>/<thought> stream extraction
+│   ├── diagnostics.ts  # Unified credential-free report across providers
+│   └── url.ts          # Base URL validation / normalization / joining
+├── providers/
+│   ├── xiaomi/  zai/  groq/  nvidia/   # Fixed-catalog descriptors
+│   ├── omniroute/                      # Full dynamic provider module
+│   └── index.ts                        # Registry assembly
+├── commands/           # Command registrations
+├── ui/                 # Providers & Models tree view
+├── extension.ts        # Activation (lightweight, zero network I/O)
+└── secretsMigration.ts # One-time plaintext→SecretStorage migration
+tests/
+├── mocks/vscode.ts     # Minimal vscode API mock for unit tests
+├── helpers/sse.ts      # SSE stream builders
+└── unit/               # 21 files, 220+ cases incl. cross-provider contract tests
+```
+
+</details>
+
+## ⚙️ Configuration
+
+### API keys & SecretStorage
+
+Set keys through the UI — never edit settings files:
+
+- Tree view → 🔑 icon on a provider row, or
+- `Copilot Amplify: Manage Providers… → Set API Key`
+
+Keys are stored via [`vscode.SecretStorage`](https://code.visualstudio.com/api/references/vscode-api#SecretStorage)
+(OS keychain-backed) and never appear in logs, diagnostics, or errors.
+Upgrading from 1.x? Plaintext settings entries are migrated automatically on
+first activation and then removed.
+
+> 💡 **OmniRoute anonymous mode:** no key needed for local servers — they work out of the box.
+
+### General settings
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `copilot-amplify.enableReasoning` | `true` | Global reasoning toggle for thinking-capable models |
+| `copilot-amplify.customSystemPrompt` | *(empty)* | Injected into every request across providers |
+| `copilot-amplify.requestTimeoutMs` | `120000` | Chat request timeout for fixed-catalog providers |
+| `copilot-amplify.debugLogging` | `false` | Debug-level logs in the output channel |
+| `copilot-amplify.circuitBreaker.enabled` | `true` | Fail-fast after repeated failures — **every** provider |
+| `copilot-amplify.circuitBreaker.failureThreshold` | `5` | Consecutive failures before a circuit opens |
+| `copilot-amplify.circuitBreaker.resetTimeoutSeconds` | `30` | Cooldown before a half-open probe |
+
+### OmniRoute settings
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `copilot-amplify.omniroute.baseUrl` | `http://localhost:20128/v1` | Server base URL (validated + normalized) |
+| `copilot-amplify.omniroute.chatEndpoint` | *(empty)* | Custom chat-completions route — absolute URL or path relative to Base URL |
+| `copilot-amplify.omniroute.noCache` | `false` | Bypass the server-side semantic cache |
+| `copilot-amplify.omniroute.noMemory` | `true` | Skip server-side memory/skills injection |
+| `copilot-amplify.omniroute.compression` | *(empty)* | Compression override (`off`, `default`, `engine:<id>`) |
+| `copilot-amplify.omniroute.sessionId` | *(empty)* | Explicit session tag for cost attribution/memory |
+| `copilot-amplify.omniroute.progress` | `false` | Opt into server progress events |
+| `copilot-amplify.omniroute.modelCacheTtlSeconds` | `300` | Model discovery cache TTL |
+| `copilot-amplify.omniroute.requestTimeoutMs` | `120000` | Chat request timeout |
+| `copilot-amplify.omniroute.discoveryTimeoutMs` | `8000` | Discovery / connection-test timeout |
+| `copilot-amplify.omniroute.warmupOnStartup` | `false` | Discover models at activation instead of first use |
+| `copilot-amplify.omniroute.logTelemetry` | `true` | Log routing/cost telemetry per request |
+
+Base URLs are normalized — these are all equivalent, no `//v1` accidents:
+
+```text
+https://example.com        https://example.com/
+https://example.com/v1     https://example.com/v1/
+```
+
+## 🎮 Commands
+
+**General**
+
+| Command | Description |
+|---|---|
+| `Copilot Amplify: Manage Providers…` | QuickPick hub: keys, tests, refresh, diagnostics |
+| `Copilot Amplify: Refresh Providers & Models` | Invalidate caches + re-discover |
+| `Copilot Amplify: Show Diagnostics` | Credential-free report for **all** providers |
+| `Copilot Amplify: Set / Clear API Key` | Credential management (context-aware in the tree) |
+| `Copilot Amplify: Test Connection` | Lightweight reachability + auth probe |
+| `Copilot Amplify: Pin / Unpin / Select Model` | Favorites and active model |
+
+**OmniRoute-specific**
+
+| Command | Description |
+|---|---|
+| `OmniRoute: Configure…` | Guided: base URL → chat endpoint → optional key → test |
+| `OmniRoute: Edit Chat Endpoint` | Quick custom-endpoint override (also in the tree ACTIONS panel) |
+| `OmniRoute: Set / Remove API Key` | SecretStorage credential management |
+| `OmniRoute: Test Connection` | Latency + chat-model count report |
+| `OmniRoute: Refresh Models` | Force re-discovery of `/models` |
+| `OmniRoute: Show Diagnostics` | Full configuration & health report |
+| `OmniRoute: Reset Configuration` | Restore defaults + clear stored key |
+| `Show Omniroute Telemetry` | Open the per-request telemetry log channel |
+
+## 🛡️ Reliability
+
+- **Retries** — exponential backoff with full jitter on `408/429/5xx` and network errors; honors `Retry-After` on every transport path; never retries `400/401/403/404`, cancellations, or open circuits.
+- **Circuit breaker** — per-provider, settings-driven; open circuits reject *instantly* instead of burning backoff time; automatic half-open recovery probe.
+- **Timeouts** — separate request/discovery budgets; nothing hangs indefinitely.
+- **Saturation awareness** — `503/529` bodies are inspected to distinguish *queue saturation* from *maintenance*; errors tell you which and what it means.
+- **Live health** — `connected` · `not-configured` · `error` · `rate-limited` · `auth-failed`, reflected in the tree in real time.
+- **Streaming** — hardened SSE parser: fragmented chunks, multi-event frames, CRLF, comments, `[DONE]`, malformed-frame tolerance, trailing flushes. Reasoning deltas stream as native thinking parts.
+- **Cancellation** — every request wires VS Code tokens into abort signals; cancelled streams release resources immediately.
+
+## 🔒 Security
+
+- 🔑 Credentials **only** in SecretStorage; legacy plaintext settings migrated away automatically and never logged.
+- 🙈 Central logger redacts `Authorization` headers, bearer tokens, and sensitive keys; diagnostics expose only a boolean *configured* flag.
+- 🌐 Base URLs validated before any network call: http/https only, embedded credentials rejected (SSRF guard).
+- 🧰 Tool-call arguments parsed with prototype-pollution-safe JSON.
+- 📋 Telemetry logging uses a strict header allowlist — nothing arbitrary is dumped.
+
+## 🩺 Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| *"Authentication failed (401)"* | Re-set the key (tree 🔑). Keys are **never** deleted automatically. `403` usually means region/access restrictions. |
+| OmniRoute shows no models | Run `OmniRoute: Test Connection`. Check diagnostics for the last discovery error; missing `/v1` in the Base URL is the usual culprit. |
+| *"circuit open"* errors | The breaker tripped after repeated failures. Wait out the cooldown or lower `failureThreshold`; disable entirely via `circuitBreaker.enabled`. |
+| New server model not in picker | `Refresh Providers & Models`. Non-chat entries (embeddings/rerank/TTS) are filtered by design. |
+| Requests feel stuck | Lower `requestTimeoutMs` / `omniroute.requestTimeoutMs`; enable `debugLogging` and check the output channel. |
+
+More walkthroughs: [`docs/usage-examples.md §8`](docs/usage-examples.md).
+
+## 💻 Development
+
+```bash
+npm install
+npm run compile     # tsc build → out/
+npm run watch       # incremental build
+npm run lint        # eslint (src + tests, typed)
+npm run typecheck   # tsc --noEmit (strict + noUncheckedIndexedAccess)
+npm test            # vitest — 223 tests, fully mocked, no real keys needed
+npm run package     # vsce → .vsix
+```
+
+The test suite covers URL normalization, SSE robustness, retry semantics,
+circuit-breaker transitions, cache coalescing, error taxonomy, secret
+redaction, tool-call parsing, context-truncation integrity, OmniRoute
+discovery/filtering, connection testing, session handling, telemetry
+normalization, secrets migration, and a cross-provider contract suite.
+
+## 🤝 Contributing
+
+Contributions are welcome! Good first steps:
+
+1. 📖 Read **[docs/adding-a-provider.md](docs/adding-a-provider.md)** — adding a provider requires exactly one descriptor module, registration wiring, and tests. No core changes.
+2. 🐛 Check [open issues](https://github.com/mojahid2021/copilot-amplify/issues) or file a bug with reproduction steps.
+3. ✅ Before opening a PR: `npm run typecheck && npm run lint && npm test` must pass.
+4. 📝 Follow Conventional Commits (`feat:`, `fix:`, `docs:` …).
+
+Design decisions are documented as ADRs in [`docs/adr/`](docs/adr/).
+
+## 📚 Documentation
+
+| Doc | Contents |
+|---|---|
+| [`docs/usage-examples.md`](docs/usage-examples.md) | Copy-paste setup recipes, endpoint examples, tuning, troubleshooting |
+| [`docs/adding-a-provider.md`](docs/adding-a-provider.md) | Step-by-step guide to contributing a new provider |
+| [`docs/adr/`](docs/adr/) | Architecture decision records |
+| [`CHANGELOG.md`](CHANGELOG.md) | Release history |
+
+## 📄 License
+
+[ISC](LICENSE) © [Md Mojahid](https://github.com/mojahid2021)
+
+<div align="center">
+
+**⭐ Found this useful? Star the repo — it helps others discover it!**
+
+</div>

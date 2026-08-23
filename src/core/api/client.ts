@@ -1,5 +1,4 @@
-import http from 'http';
-import https from 'https';
+import * as vscode from 'vscode';
 import OpenAI from 'openai';
 import type {
   ChatCompletionChunk,
@@ -11,16 +10,30 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat/completions/completions';
 import { match } from 'ts-pattern';
-import type * as vscode from 'vscode';
 
-const defaultHttpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 64 });
-const defaultHttpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 1000, maxSockets: 64 });
+// Node's `agent` option is silently ignored by undici's global fetch; the
+// dispatcher below already pools connections. Passing it only misled readers.
+export const customFetch = (url: string | URL | unknown, init?: RequestInit): Promise<Response> =>
+  fetch(url as Parameters<typeof fetch>[0], { ...init, keepalive: true });
 
-export const customFetch = (url: string | URL | unknown, init?: RequestInit): Promise<Response> => {
-  const isHttp = typeof url === 'string' ? url.startsWith('http:') : (url instanceof URL && url.protocol === 'http:');
-  const agent = isHttp ? defaultHttpAgent : defaultHttpsAgent;
-  return fetch(url as Parameters<typeof fetch>[0], { ...init, agent, keepalive: true } as Parameters<typeof fetch>[1]);
-};
+/** Default chat-request timeout applied when a caller does not specify one. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * Read the user-configured request timeout for fixed-catalog providers.
+ * Falls back to {@link DEFAULT_REQUEST_TIMEOUT_MS} outside an active
+ * workspace or when the value is implausibly small.
+ */
+export function readRequestTimeoutMs(): number {
+  try {
+    const raw = vscode.workspace
+      .getConfiguration('copilot-amplify')
+      .get<number>('requestTimeoutMs', DEFAULT_REQUEST_TIMEOUT_MS);
+    return Math.max(1_000, raw);
+  } catch {
+    return DEFAULT_REQUEST_TIMEOUT_MS;
+  }
+}
 
 export interface GenericMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -82,15 +95,27 @@ export interface ChatOptions {
   extraBody?: Record<string, unknown>;
 }
 
+/**
+ * Provider-agnostic API failure carrying the HTTP status and — when
+ * available — response headers (used for `Retry-After`) and body.
+ */
 export class ApiError extends Error {
   constructor(
     message: string,
     public readonly statusCode: number,
     public readonly response?: unknown,
+    public readonly headers?: Record<string, string>,
   ) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+export interface GenericApiClientOptions {
+  /** Per-request timeout in ms forwarded to the OpenAI client. */
+  timeoutMs?: number;
+  /** Override the transport (tests). */
+  fetchImpl?: typeof fetch;
 }
 
 export class GenericApiClient {
@@ -101,11 +126,16 @@ export class GenericApiClient {
     baseURL: string,
     private readonly providerName: string,
     private readonly defaultTemperature = 1.0,
+    options: GenericApiClientOptions = {},
   ) {
     this.client = new OpenAI({
       apiKey,
       baseURL,
-      fetch: customFetch,
+      fetch: options.fetchImpl ?? customFetch,
+      // Explicit caller timeouts win (OmniRoute); otherwise apply the shared
+      // user-configured default so no chat request can hang indefinitely.
+      timeout: options.timeoutMs ?? readRequestTimeoutMs(),
+      maxRetries: 0, // retries are owned by executeWithRetry
     });
   }
 
@@ -115,8 +145,7 @@ export class GenericApiClient {
     }
 
     let text = '';
-    for (let i = 0; i < content.length; i++) {
-      const part = content[i];
+    for (const part of content) {
       if (part.type === 'text') {
         text += part.text;
       }
@@ -263,7 +292,12 @@ export class GenericApiClient {
     return match(error)
       .when(
         (value): value is InstanceType<typeof OpenAI.APIError> => value instanceof OpenAI.APIError,
-        (value) => new ApiError(`${this.providerName} API error: ${value.status} ${value.message}`, value.status ?? 0, value.error),
+        (value) => new ApiError(
+          `${this.providerName} API error: ${value.status} ${value.message}`,
+          value.status ?? 0,
+          value.error,
+          (value.headers ?? undefined) as Record<string, string> | undefined,
+        ),
       )
       .when(
         (value): value is Error => value instanceof Error,
@@ -318,15 +352,23 @@ export class GenericApiClient {
     model: string,
     messages: GenericMessage[],
     options?: ChatOptions,
+    cancellationToken?: vscode.CancellationToken,
   ): Promise<string> {
+    const abortController = new AbortController();
+    const cancellationDisposable = cancellationToken?.onCancellationRequested(() =>
+      abortController.abort(),
+    );
     try {
       const response = await this.client.chat.completions.create(
         this.buildNonStreamingParams(model, messages, options),
+        { signal: abortController.signal },
       );
       const content = response.choices?.[0]?.message?.content;
       return typeof content === 'string' ? content : '';
     } catch (error) {
       throw this.toApiError(error);
+    } finally {
+      cancellationDisposable?.dispose();
     }
   }
 }

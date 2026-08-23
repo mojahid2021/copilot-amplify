@@ -8,6 +8,7 @@
     "outDir": "out",
     "declaration": true,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "skipLibCheck": true,

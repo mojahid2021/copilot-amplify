@@ -1,5 +1,13 @@
 import * as vscode from 'vscode';
 
+/**
+ * SecretStorage-backed credential management for one provider.
+ *
+ * Keys live exclusively in VS Code's secret store — never in settings.json.
+ * A legacy key name can be provided for backwards compatibility; on first
+ * successful read the legacy value is migrated to the current key and the
+ * legacy entry removed.
+ */
 export class BaseAuthManager implements vscode.Disposable {
   private readonly onDidChangeApiKeyEmitter = new vscode.EventEmitter<void>();
 
@@ -24,6 +32,13 @@ export class BaseAuthManager implements vscode.Disposable {
     if (this.legacySecretKey) {
       const legacyKey = await this.secrets.get(this.legacySecretKey);
       if (legacyKey) {
+        // One-time migration: copy to current key, drop legacy entry.
+        try {
+          await this.secrets.store(this.secretKey, legacyKey);
+          await this.secrets.delete(this.legacySecretKey);
+        } catch {
+          /* storage failures must not break request paths */
+        }
         return legacyKey;
       }
     }
@@ -40,6 +55,10 @@ export class BaseAuthManager implements vscode.Disposable {
     this.onDidChangeApiKeyEmitter.fire();
   }
 
+  /**
+   * Prompt the user for an API key and persist it.
+   * Resolves undefined when dismissed.
+   */
   async promptForApiKey(): Promise<string | undefined> {
     const input = await vscode.window.showInputBox({
       prompt: `Enter your ${this.displayName} API Key`,
@@ -67,5 +86,9 @@ export class BaseAuthManager implements vscode.Disposable {
 
   async getOrPromptApiKey(): Promise<string | undefined> {
     return (await this.getApiKey()) ?? this.promptForApiKey();
+  }
+
+  hasApiKey(): Thenable<boolean> {
+    return this.secrets.get(this.secretKey).then((key) => key !== undefined || (this.legacySecretKey !== undefined ? this.secrets.get(this.legacySecretKey).then((legacy) => legacy !== undefined) : false));
   }
 }
