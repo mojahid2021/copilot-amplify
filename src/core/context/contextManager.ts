@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { GenericContentPart, GenericMessage } from './baseApi';
+import type { GenericContentPart, GenericMessage } from '../api/client';
 import { convertMessages } from './converter';
 
 export interface ContextWindowConfig {
@@ -51,6 +51,9 @@ export function prepareContextMessages(
     const existingSystemIdx = converted.findIndex((m) => m.role === 'system');
     if (existingSystemIdx >= 0) {
       const existing = converted[existingSystemIdx];
+      if (!existing) {
+        converted.unshift({ role: 'system', content: systemPrompt });
+      } else {
       const existingText =
         typeof existing.content === 'string'
           ? existing.content
@@ -62,6 +65,7 @@ export function prepareContextMessages(
         role: 'system',
         content: `${systemPrompt}\n\n${existingText}`,
       };
+      }
     } else {
       converted.unshift({ role: 'system', content: systemPrompt });
     }
@@ -71,10 +75,6 @@ export function prepareContextMessages(
   const budget = Math.max(1024, config.maxInputTokens - config.reserveOutputTokens);
   let totalTokens = converted.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
 
-  if (totalTokens <= budget) {
-    return converted;
-  }
-
   const systemMsgs = converted.filter((m) => m.role === 'system');
   const nonSystemMsgs = converted.filter((m) => m.role !== 'system');
 
@@ -82,20 +82,25 @@ export function prepareContextMessages(
   while (nonSystemMsgs.length > 1 && totalTokens > budget) {
     const target = nonSystemMsgs[0];
 
-    if (target.role === 'assistant' && target.tool_calls?.length) {
+    if (target && target.role === 'assistant' && target.tool_calls?.length) {
       // Remove assistant tool call message + matching tool result messages to preserve valid schema
       const callIds = new Set(target.tool_calls.map((c) => c.id));
       nonSystemMsgs.shift();
       totalTokens -= estimateMessageTokens(target);
 
-      while (
-        nonSystemMsgs.length > 0 &&
-        nonSystemMsgs[0].role === 'tool' &&
-        nonSystemMsgs[0].tool_call_id &&
-        callIds.has(nonSystemMsgs[0].tool_call_id)
-      ) {
-        const toolMsg = nonSystemMsgs.shift()!;
-        totalTokens -= estimateMessageTokens(toolMsg);
+      for (;;) {
+        const toolMsg = nonSystemMsgs[0];
+        if (
+          nonSystemMsgs.length > 0 &&
+          toolMsg?.role === 'tool' &&
+          toolMsg.tool_call_id &&
+          callIds.has(toolMsg.tool_call_id)
+        ) {
+          nonSystemMsgs.shift();
+          totalTokens -= estimateMessageTokens(toolMsg);
+          continue;
+        }
+        break;
       }
     } else {
       const removed = nonSystemMsgs.shift();
@@ -106,7 +111,25 @@ export function prepareContextMessages(
   }
 
   // Ensure sequence does not start with an orphaned tool message
-  while (nonSystemMsgs.length > 1 && nonSystemMsgs[0].role === 'tool') {
+  while (nonSystemMsgs.length > 1 && nonSystemMsgs[0]?.role === 'tool') {
+    nonSystemMsgs.shift();
+  }
+
+  // Ensure no assistant message references tool_calls whose tool results are missing.
+  // Collect all remaining tool_call_ids from tool messages.
+  const presentToolCallIds = new Set(
+    nonSystemMsgs
+      .filter((m) => m.role === 'tool' && m.tool_call_id)
+      .map((m) => m.tool_call_id!),
+  );
+
+  // Remove leading assistant messages with tool_calls that lost their results
+  while (
+    nonSystemMsgs.length > 1 &&
+    nonSystemMsgs[0]?.role === 'assistant' &&
+    nonSystemMsgs[0].tool_calls?.length &&
+    nonSystemMsgs[0].tool_calls.every((c) => !presentToolCallIds.has(c.id))
+  ) {
     nonSystemMsgs.shift();
   }
 

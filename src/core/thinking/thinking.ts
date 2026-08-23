@@ -45,6 +45,10 @@ function appendThinkingSegment(segment: string, insideThinking: boolean): string
   return insideThinking ? `${segment}${THINK_CLOSE_MARKDOWN}` : `${segment}${THINK_OPEN_MARKDOWN}`;
 }
 
+// Maximum length of any supported thinking tag (</thought> = 10 chars).
+// If the partial buffer grows beyond this, it can't be a valid tag prefix — flush it.
+const MAX_TAG_LENGTH = 10;
+
 export function processThinkingContent(content: string, state: ThinkingState): { output: string; state: ThinkingState } {
   if (
     !state.insideThinking
@@ -74,8 +78,17 @@ export function processThinkingContent(content: string, state: ThinkingState): {
       continue;
     }
 
+    // Safety: if the buffered partial match exceeds the maximum tag length,
+    // it can't be a valid tag — flush the entire buffer as regular content.
+    if (partialSuffixLength >= MAX_TAG_LENGTH) {
+      output += buffer;
+      buffer = '';
+      continue;
+    }
+
     output += buffer.slice(0, -partialSuffixLength);
     buffer = buffer.slice(-partialSuffixLength);
+    break;
   }
 
   return { output, state: { buffer, insideThinking } };

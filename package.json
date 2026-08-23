@@ -1,10 +1,10 @@
 {
   "name": "copilot-amplify",
-  "version": "1.0.36",
+  "version": "2.1.0",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
-  "publisher": "LuneCode",
+  "publisher": "mojahid2021",
   "repository": {
     "type": "git",
     "url": "https://github.com/mojahid2021/copilot-amplify"
@@ -46,40 +46,26 @@
           "default": "",
           "markdownDescription": "Custom system prompt or guardrail instructions to inject into chat requests across all providers."
         },
-        "copilot-amplify.xiaomi.apiKey": {
-          "type": "string",
-          "markdownDescription": "Xiaomi MiMo API Key. Get yours from the [Xiaomi MiMo console](https://www.xiaomimimo.com/). Both Pay-as-you-go (`sk-...`) and Token Plan (`tp-...`) keys are supported.",
-          "secret": true
-        },
-        "copilot-amplify.glm.apiKey": {
-          "type": "string",
-          "markdownDescription": "Z.ai GLM API Key. Get yours from the [Z.ai console](https://z.ai/).",
-          "secret": true
-        },
-        "copilot-amplify.groq.apiKey": {
-          "type": "string",
-          "markdownDescription": "Groq API Key. Get yours from the [Groq console](https://console.groq.com/).",
-          "secret": true
-        },
-        "copilot-amplify.nvidia.apiKey": {
-          "type": "string",
-          "markdownDescription": "NVIDIA NIM API Key. Get yours from the [NVIDIA build site](https://build.nvidia.com/).",
-          "secret": true
-        },
-        "copilot-amplify.omniroute.apiKey": {
-          "type": "string",
-          "markdownDescription": "Omniroute Bearer token. Configure the local Omniroute server (default `http://localhost:20128/v1`) with your provider credentials, then enter its API key here.",
-          "secret": true
-        },
         "copilot-amplify.enableReasoning": {
           "type": "boolean",
           "default": true,
           "markdownDescription": "Globally enable reasoning capabilities for supported models (e.g. DeepSeek-R1, QwQ). This applies to both the Chat panel and native Copilot Chat."
         },
+        "copilot-amplify.requestTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "markdownDescription": "Chat request timeout in milliseconds for fixed-catalog providers (Xiaomi MiMo, Z.ai, Groq, NVIDIA NIM). Prevents hung requests from blocking for minutes."
+        },
         "copilot-amplify.omniroute.baseUrl": {
           "type": "string",
           "default": "http://localhost:20128/v1",
           "markdownDescription": "Base URL of the OmniRoute server, including the `/v1` prefix. Change this if you run OmniRoute on a different host/port."
+        },
+        "copilot-amplify.omniroute.chatEndpoint": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Custom chat-completions endpoint override. Accepts an absolute URL (`https://gateway.example.com/custom/chat`) or a path relative to the Base URL (`my-proxy/chat`). Leave empty to use the standard `{Base URL}/chat/completions`."
         },
         "copilot-amplify.omniroute.noCache": {
           "type": "boolean",
@@ -111,6 +97,50 @@
           "default": 300,
           "minimum": 10,
           "markdownDescription": "How long (in seconds) the discovered model list stays cached before refetching `GET /v1/models`."
+        },
+        "copilot-amplify.omniroute.requestTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "markdownDescription": "Chat request timeout in milliseconds (covers connection + full stream)."
+        },
+        "copilot-amplify.omniroute.discoveryTimeoutMs": {
+          "type": "number",
+          "default": 8000,
+          "minimum": 500,
+          "markdownDescription": "Model discovery / connection-test timeout in milliseconds."
+        },
+        "copilot-amplify.omniroute.warmupOnStartup": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Discover OmniRoute models when the extension activates instead of on first use. Off by default to keep activation lightweight."
+        },
+        "copilot-amplify.omniroute.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable debug-level logging for OmniRoute in the Copilot Amplify output channel."
+        },
+        "copilot-amplify.circuitBreaker.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Temporarily stop sending requests to a provider after repeated consecutive failures, retrying after a cooldown."
+        },
+        "copilot-amplify.circuitBreaker.failureThreshold": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "markdownDescription": "Consecutive failures before a provider's circuit opens."
+        },
+        "copilot-amplify.circuitBreaker.resetTimeoutSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 5,
+          "markdownDescription": "Cooldown (seconds) before a single probe request is allowed through an open circuit."
+        },
+        "copilot-amplify.debugLogging": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable debug-level logging in the Copilot Amplify output channel."
         },
         "copilot-amplify.omniroute.logTelemetry": {
           "type": "boolean",
@@ -253,6 +283,68 @@
         "enablement": "false"
       },
       {
+        "command": "copilot-amplify.documentation",
+        "title": "Documentation & Guide"
+      },
+      {
+        "command": "copilot-amplify.report",
+        "title": "Report Issue or Feedback"
+      },
+      {
+        "command": "copilot-amplify.omniroute.configure",
+        "title": "OmniRoute: Configure…",
+        "category": "Copilot Amplify",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.setApiKey",
+        "title": "OmniRoute: Set API Key",
+        "category": "Copilot Amplify",
+        "icon": "$(key)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.removeApiKey",
+        "title": "OmniRoute: Remove API Key",
+        "category": "Copilot Amplify",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.testConnection",
+        "title": "OmniRoute: Test Connection",
+        "category": "Copilot Amplify",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.refreshModels",
+        "title": "OmniRoute: Refresh Models",
+        "category": "Copilot Amplify",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.editChatEndpoint",
+        "title": "OmniRoute: Edit Chat Endpoint",
+        "category": "Copilot Amplify",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "copilot-amplify.showDiagnostics",
+        "title": "Show Diagnostics",
+        "category": "Copilot Amplify",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.showDiagnostics",
+        "title": "OmniRoute: Show Diagnostics",
+        "category": "Copilot Amplify",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "copilot-amplify.omniroute.resetConfiguration",
+        "title": "OmniRoute: Reset Configuration",
+        "category": "Copilot Amplify",
+        "icon": "$(discard)"
+      },
+      {
         "command": "copilot-amplify.omniroute.showTelemetry",
         "title": "Show Omniroute Telemetry",
         "icon": "$(output)"
@@ -263,8 +355,11 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
+    "lint": "eslint src/ tests/",
+    "lint:fix": "eslint src/ tests/ --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "node -e \"require('fs').rmSync('out', { recursive: true, force: true }); require('fs').rmSync('tsconfig.tsbuildinfo', { force: true })\"",
     "package": "vsce package",
     "publish": "vsce publish"
@@ -283,6 +378,7 @@
     "eslint-plugin-n": "^18.2.2",
     "globals": "^17.7.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.64.0"
+    "typescript-eslint": "^8.64.0",
+    "vitest": "^3.2.7"
   }
 }

@@ -1,7 +1,7 @@
 import secureJsonParse from 'secure-json-parse';
 import { P, match } from 'ts-pattern';
 import * as vscode from 'vscode';
-import type { GenericContentPart, GenericMessage, GenericTool, GenericToolCall } from './baseApi';
+import type { GenericContentPart, GenericMessage, GenericTool, GenericToolCall } from '../api/client';
 
 const textDecoder = new TextDecoder();
 
@@ -32,6 +32,11 @@ export function convertTools(
     : undefined;
 }
 
+/**
+ * Parse streamed tool-call argument fragments.
+ * Tolerates markdown fencing and malformed JSON (returns `{}` rather than
+ * throwing) so one bad fragment never aborts a whole response.
+ */
 export function parseToolArguments(argumentsText: string): Record<string, unknown> {
   let cleaned = (argumentsText || '{}').trim();
 
