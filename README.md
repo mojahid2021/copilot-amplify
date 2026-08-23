@@ -10,7 +10,8 @@ Xiaomi MiMo · Z.ai GLM · Groq · NVIDIA NIM · OmniRoute — all first-class,
 equal siblings inside the VS Code Language Model API.
 
 [![Version](https://img.shields.io/badge/version-2.1.0-blue)](CHANGELOG.md)
-[![VS Code](https://img.shields.io/badge/VS_Code-%E2%89%A51.125-007ACC?logo=visualstudiocode&logoColor=white)](https://code.visualstudio.com/)
+[![VS Code Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-installed-0098FF?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=mojahid2021.copilot-amplify)
+[![Open VSX](https://img.shields.io/badge/Open_VSX-2.1.0-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
 [![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen)](#-development)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#-development)
 [![License](https://img.shields.io/badge/license-ISC-yellow)](LICENSE)
@@ -58,7 +59,23 @@ Copilot Amplify opens it up:
 
 ## 📦 Installation
 
-**Option A — build from source**
+**Option A — from a marketplace (recommended)**
+
+Available on both major registries:
+
+| Registry | Install |
+|---|---|
+| **VS Code Marketplace** | [Install for VS Code](https://marketplace.visualstudio.com/items?itemName=mojahid2021.copilot-amplify) — click *Install*, or inside VS Code: `Extensions → Search "Copilot Amplify"` |
+| **Open VSX** | [Install for VSCodium / Gitpod / Cursor & friends](https://open-vsx.org/extension/mojahid2021/copilot-amplify) — or CLI: `open-vsx` compatible editors via `code --install-extension mojahid2021.copilot-amplify` |
+
+Or straight from the terminal:
+
+```bash
+# VS Code / Cursor / Windsurf
+code --install-extension mojahid2021.copilot-amplify
+```
+
+**Option B — build from source**
 
 ```bash
 git clone https://github.com/mojahid2021/copilot-amplify.git
@@ -69,7 +86,7 @@ npm run compile
 
 Then press <kbd>F5</kbd> in VS Code to launch an Extension Development Host.
 
-**Option B — packaged VSIX**
+**Option C — packaged VSIX**
 
 ```bash
 npm install && npm run package   # → copilot-amplify-<version>.vsix
@@ -300,6 +317,20 @@ circuit-breaker transitions, cache coalescing, error taxonomy, secret
 redaction, tool-call parsing, context-truncation integrity, OmniRoute
 discovery/filtering, connection testing, session handling, telemetry
 normalization, secrets migration, and a cross-provider contract suite.
+
+### Publishing
+
+Releases go to both registries:
+
+```bash
+npm run package                          # build copilot-amplify-<version>.vsix
+
+# VS Code Marketplace (publisher: mojahid2021)
+npx vsce publish
+
+# Open VSX (VSCodium, Gitpod, and other VS Code forks)
+npx ovsx publish --pat <OPEN_VSX_PAT>
+```
 
 ## 🤝 Contributing
 
