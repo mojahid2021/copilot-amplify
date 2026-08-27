@@ -95,7 +95,7 @@ export function validateBaseUrl(input: string | undefined): UrlValidation {
   try {
     url = new URL(trimmed);
   } catch {
-    return { ok: false, error: 'Not a valid URL. Example: http://localhost:3000 or https://omniroute.example.com' };
+    return { ok: false, error: 'Not a valid URL. Example: http://localhost:20128/v1 or https://omniroute.example.com/v1 (the /v1 path is required for OmniRoute).' };
   }
 
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {

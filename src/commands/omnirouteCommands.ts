@@ -46,8 +46,8 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
         let baseUrl: string | undefined;
         for (;;) {
           const input = await vscode.window.showInputBox({
-            prompt: 'OmniRoute Base URL',
-            placeHolder: 'http://localhost:3000 or https://omniroute.example.com',
+            prompt: 'OmniRoute Base URL — must include the /v1 path (e.g. http://localhost:20128/v1)',
+            placeHolder: 'http://localhost:20128/v1 or https://omniroute.example.com/v1',
             value: cfg.baseUrl,
             ignoreFocusOut: true,
             validateInput: (value) => validateBaseUrl(value).error,
@@ -57,24 +57,6 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
           await updateSetting('baseUrl', baseUrl);
           break;
         }
-
-        // 1b. Optional custom chat endpoint (absolute URL or path; empty = standard).
-        const chatEndpoint = await vscode.window.showInputBox({
-          prompt: 'Custom chat-completions endpoint (leave empty for the default {Base URL}/chat/completions)',
-          placeHolder: 'e.g. my-proxy/chat or https://gateway.example.com/custom/chat',
-          value: cfg.chatEndpoint,
-          ignoreFocusOut: true,
-          validateInput: (value) => {
-            const trimmed = (value ?? '').trim();
-            if (!trimmed || /^https?:\/\//i.test(trimmed)) {
-              return undefined; // empty or absolute — validated at resolution time
-            }
-            // Relative paths must not contain a scheme fragment or spaces.
-            return /[\s]/.test(trimmed) ? 'Path cannot contain whitespace.' : undefined;
-          },
-        });
-        if (chatEndpoint === undefined) { return; }
-        await updateSetting('chatEndpoint', chatEndpoint.trim());
 
         // 2. API key (optional; stored in SecretStorage only).
         const setKeyChoice = await vscode.window.showQuickPick(
@@ -112,6 +94,57 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       } catch (error) {
         void vscode.window.showErrorMessage(
           `OmniRoute configuration failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }),
+
+    vscode.commands.registerCommand('copilot-amplify.omniroute.editBaseUrl', async () => {
+      try {
+        const cfg = getOmnirouteConfig();
+        const auth = registry.auth('omniroute');
+        const input = await vscode.window.showInputBox({
+          prompt: 'OmniRoute Base URL — must include the /v1 path (e.g. http://localhost:20128/v1)',
+          placeHolder: 'http://localhost:20128/v1 or https://omniroute.example.com/v1',
+          value: cfg.baseUrl,
+          ignoreFocusOut: true,
+          validateInput: (value) => validateBaseUrl(value).error,
+        });
+        if (input === undefined) { return; } // dismissed
+
+        const baseUrl = normalizeBaseUrl(input, '');
+        if (baseUrl === cfg.baseUrl) {
+          void vscode.window.showInformationMessage(`OmniRoute base URL unchanged: ${baseUrl}`);
+          return;
+        }
+        await updateSetting('baseUrl', baseUrl);
+
+        // Bust caches so the model list refetches from the new host.
+        try {
+          registry.provider('omniroute').refreshCaches();
+        } catch { /* not yet instantiated */ }
+
+        // Verify the new endpoint actually responds.
+        const key = await auth.getApiKey();
+        const test = await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: 'Copilot Amplify: testing OmniRoute…' },
+          () => testOmnirouteConnection({ baseUrl, ...(key ? { apiKey: key } : {}) }),
+        );
+
+        if (!test.ok) {
+          const status = test.httpStatus !== undefined ? `\n\nHTTP Status:\n${test.httpStatus}` : '';
+          void vscode.window.showErrorMessage(
+            `✗ OmniRoute connection failed\n\nReason:\n${test.message}${status}\n\nBase URL saved as: ${baseUrl}`,
+            { modal: false },
+          );
+        } else {
+          void vscode.window.showInformationMessage(
+            `✓ OmniRoute base URL set to: ${baseUrl}\n\nLatency: ${test.latencyMs ?? '?'} ms · ${test.modelCount ?? '?'} models`,
+          );
+        }
+        tree.refresh();
+      } catch (error) {
+        void vscode.window.showErrorMessage(
+          `Updating the OmniRoute base URL failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }),
@@ -199,44 +232,6 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       showLogChannel(true);
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.editChatEndpoint', async () => {
-      try {
-        const cfg = getOmnirouteConfig();
-        const current = cfg.chatEndpoint;
-        const input = await vscode.window.showInputBox({
-          prompt: `Custom chat-completions endpoint (current: ${current || 'default — {Base URL}/chat/completions'})`,
-          placeHolder: 'e.g. my-proxy/chat or https://gateway.example.com/custom/chat — leave empty to reset',
-          value: current,
-          ignoreFocusOut: true,
-          validateInput: (value) => {
-            const trimmed = (value ?? '').trim();
-            if (!trimmed || /^https?:\/\//i.test(trimmed)) {
-              return undefined; // empty or absolute — validated at resolution time
-            }
-            return /[\s]/.test(trimmed) ? 'Path cannot contain whitespace.' : undefined;
-          },
-        });
-        if (input === undefined) { return; } // dismissed
-
-        await updateSetting('chatEndpoint', input.trim());
-        try {
-          registry.provider('omniroute').refreshCaches();
-        } catch { /* not yet instantiated */ }
-        tree.refresh();
-
-        const trimmed = input.trim();
-        void vscode.window.showInformationMessage(
-          trimmed
-            ? `OmniRoute chat endpoint set to: ${trimmed}`
-            : 'OmniRoute chat endpoint reset to the default ({Base URL}/chat/completions)',
-        );
-      } catch (error) {
-        void vscode.window.showErrorMessage(
-          `Updating the chat endpoint failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }),
-
     vscode.commands.registerCommand('copilot-amplify.omniroute.resetConfiguration', async () => {
       const choice = await vscode.window.showWarningMessage(
         'Reset all OmniRoute settings and remove its stored API key?',
@@ -247,7 +242,6 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
 
       const defaults: Record<string, unknown> = {
         baseUrl: DEFAULT_BASE_URL,
-        chatEndpoint: '',
         noCache: false,
         noMemory: true,
         compression: '',

@@ -25,7 +25,6 @@ export function buildOmnirouteDiagnostics(input: DiagnosticsInput): string {
     'Copilot Amplify — OmniRoute Diagnostics',
     '',
     `Base URL:          ${input.baseUrl}`,
-    ...(cfg.chatEndpoint ? [`Chat endpoint:     ${cfg.chatEndpoint} (custom)`] : []),
     `API Key:           ${input.apiKeyConfigured ? 'Configured' : 'Not configured (anonymous mode)'}`,
     `Session ID source: ${cfg.sessionId ? 'setting override' : 'auto (window-scoped)'}`,
     '',

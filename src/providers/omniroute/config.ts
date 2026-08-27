@@ -23,8 +23,6 @@ export { DEFAULT_BASE_URL };
 export interface OmnirouteConfig {
   /** Base URL of the OmniRoute server, including the `/v1` prefix if used. */
   baseUrl: string;
-  /** Custom chat-completions endpoint (absolute URL or path); empty = `{baseUrl}/chat/completions`. */
-  chatEndpoint: string;
   /** Send `X-OmniRoute-No-Cache: true` to bypass the semantic cache. */
   noCache: boolean;
   /** Send `x-omniroute-no-memory: true` to skip memory + skills injection. */
@@ -81,7 +79,6 @@ export function getOmnirouteConfig(): OmnirouteConfig {
 
   cachedConfig = {
     baseUrl: normalizeBaseUrl(cfg.get<string>('baseUrl'), DEFAULT_BASE_URL),
-    chatEndpoint: (cfg.get<string>('chatEndpoint') ?? '').trim(),
     noCache: cfg.get<boolean>('noCache', false),
     noMemory: cfg.get<boolean>('noMemory', true),
     compression: (cfg.get<string>('compression') ?? '').trim(),

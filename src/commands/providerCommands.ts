@@ -34,7 +34,7 @@ export function registerProviderCommands(context: vscode.ExtensionContext, deps:
           { label: '$(sync) Refresh Providers & Models', action: 'refresh', description: 'Refetch live models and update state' },
           { label: '$(pulse) Show Diagnostics', action: 'diagnostics', description: 'All providers: status, keys, circuits' },
           { label: '$(gear) Configure OmniRoute…', action: 'omniroute-configure', description: 'Base URL, API key and options' },
-          { label: '$(edit) Edit OmniRoute Chat Endpoint', action: 'omniroute-endpoint', description: 'Custom chat-completions route override' },
+          { label: '$(link) Edit OmniRoute Base URL', action: 'omniroute-baseurl', description: 'Change the OmniRoute server URL' },
           { label: '$(pulse) Show OmniRoute Diagnostics', action: 'omniroute-diagnostics', description: 'Connection, cache and health report' },
           { label: '$(output) Show OmniRoute Telemetry Logs', action: 'telemetry', description: 'Open OmniRoute response logs' },
         ],
@@ -61,8 +61,8 @@ export function registerProviderCommands(context: vscode.ExtensionContext, deps:
         await vscode.commands.executeCommand('copilot-amplify.omniroute.configure');
         return;
       }
-      if (selectedAction.action === 'omniroute-endpoint') {
-        await vscode.commands.executeCommand('copilot-amplify.omniroute.editChatEndpoint');
+      if (selectedAction.action === 'omniroute-baseurl') {
+        await vscode.commands.executeCommand('copilot-amplify.omniroute.editBaseUrl');
         return;
       }
       if (selectedAction.action === 'omniroute-diagnostics') {

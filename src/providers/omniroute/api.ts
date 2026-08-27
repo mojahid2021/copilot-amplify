@@ -6,7 +6,7 @@ import type {
 import type * as vscode from 'vscode';
 import { ApiError, GenericApiClient, customFetch, type ChatOptions, type GenericMessage } from '../../core/api/client';
 import { parseSseStream } from '../../core/api/sse';
-import { joinEndpoint, normalizeBaseUrl, resolveCustomEndpoint } from '../../core/url';
+import { joinEndpoint, normalizeBaseUrl } from '../../core/url';
 import { getOmnirouteConfig, getOmnirouteBaseUrl } from './config';
 import { omnirouteModelSupportsTemperature } from './modelRegistry';
 import { resolveOmnirouteSessionId } from './session';
@@ -182,11 +182,6 @@ export class OmnirouteApiClient extends GenericApiClient {
   }
 
   private getEndpoint(path: string): string {
-    // A configured chatEndpoint override wins for chat-completions calls;
-    // everything else (discovery etc.) keeps using the standard base path.
-    if (path === '/chat/completions') {
-      return resolveCustomEndpoint(normalizeBaseUrl(getOmnirouteBaseUrl(), ''), getOmnirouteConfig().chatEndpoint, path);
-    }
     return joinEndpoint(normalizeBaseUrl(getOmnirouteBaseUrl(), ''), path);
   }
 

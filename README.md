@@ -9,9 +9,9 @@
 Xiaomi MiMo · Z.ai GLM · Groq · NVIDIA NIM · OmniRoute — all first-class,
 equal siblings inside the VS Code Language Model API.
 
-[![Version](https://img.shields.io/badge/version-2.1.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.1.1-blue)](CHANGELOG.md)
 [![VS Code Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-installed-0098FF?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=mojahid2021.copilot-amplify)
-[![Open VSX](https://img.shields.io/badge/Open_VSX-2.1.0-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
+[![Open VSX](https://img.shields.io/badge/Open_VSX-2.1.1-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
 [![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen)](#-development)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#-development)
 [![License](https://img.shields.io/badge/license-ISC-yellow)](LICENSE)
@@ -224,8 +224,7 @@ first activation and then removed.
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `copilot-amplify.omniroute.baseUrl` | `http://localhost:20128/v1` | Server base URL (validated + normalized) |
-| `copilot-amplify.omniroute.chatEndpoint` | *(empty)* | Custom chat-completions route — absolute URL or path relative to Base URL |
+| `copilot-amplify.omniroute.baseUrl` | `http://localhost:20128/v1` | Server base URL. **Must include the `/v1` path** (e.g. `http://localhost:20128/v1` or `https://omniroute.example.com/v1`). The chat-completions endpoint is fixed at `{baseUrl}/chat/completions`. |
 | `copilot-amplify.omniroute.noCache` | `false` | Bypass the server-side semantic cache |
 | `copilot-amplify.omniroute.noMemory` | `true` | Skip server-side memory/skills injection |
 | `copilot-amplify.omniroute.compression` | *(empty)* | Compression override (`off`, `default`, `engine:<id>`) |
@@ -261,8 +260,8 @@ https://example.com/v1     https://example.com/v1/
 
 | Command | Description |
 |---|---|
-| `OmniRoute: Configure…` | Guided: base URL → chat endpoint → optional key → test |
-| `OmniRoute: Edit Chat Endpoint` | Quick custom-endpoint override (also in the tree ACTIONS panel) |
+| `OmniRoute: Configure…` | Guided: base URL → optional key → test (chat endpoint is now fixed at `{baseUrl}/chat/completions`) |
+| `OmniRoute: Edit Base URL` | Quick base-URL override from the tree ACTIONS panel or the Manage QuickPick; busts the model cache and re-tests the connection. The base URL **must include the `/v1` path**. |
 | `OmniRoute: Set / Remove API Key` | SecretStorage credential management |
 | `OmniRoute: Test Connection` | Latency + chat-model count report |
 | `OmniRoute: Refresh Models` | Force re-discovery of `/models` |
@@ -298,7 +297,7 @@ https://example.com/v1     https://example.com/v1/
 | New server model not in picker | `Refresh Providers & Models`. Non-chat entries (embeddings/rerank/TTS) are filtered by design. |
 | Requests feel stuck | Lower `requestTimeoutMs` / `omniroute.requestTimeoutMs`; enable `debugLogging` and check the output channel. |
 
-More walkthroughs: [`docs/usage-examples.md §8`](docs/usage-examples.md).
+More walkthroughs: see the in-repo `docs/` guides.
 
 ## 💻 Development
 

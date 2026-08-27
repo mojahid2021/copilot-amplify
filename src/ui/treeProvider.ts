@@ -44,8 +44,8 @@ type AnyTreeItem = ProviderTreeItem | SectionTreeItem | ModelGroupTreeItem | Mod
 
 const ACTIONS = [
   { id: 'refresh', label: 'Refresh Providers & Models', icon: 'sync', command: 'copilot-amplify.refresh' },
-  { id: 'edit-endpoint', label: 'Edit OmniRoute Chat Endpoint', icon: 'edit', command: 'copilot-amplify.omniroute.editChatEndpoint' },
   { id: 'diagnostics', label: 'Show Diagnostics', icon: 'pulse', command: 'copilot-amplify.showDiagnostics' },
+  { id: 'omniroute-baseurl', label: 'Edit OmniRoute Base URL', icon: 'link', command: 'copilot-amplify.omniroute.editBaseUrl' },
   { id: 'omniroute-diagnostics', label: 'Show OmniRoute Diagnostics', icon: 'pulse', command: 'copilot-amplify.omniroute.showDiagnostics' },
   { id: 'telemetry', label: 'Show OmniRoute Telemetry Logs', icon: 'output', command: 'copilot-amplify.omniroute.showTelemetry' },
   { id: 'docs', label: 'View Documentation & Guide', icon: 'book', command: 'copilot-amplify.documentation' },

@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.1.1] - 2026-08-27
+
+### Changed
+
+- **OmniRoute chat endpoint is now fixed at `{baseUrl}/chat/completions`.** The `copilot-amplify.omniroute.chatEndpoint` setting, the `OmniRoute: Edit Chat Endpoint` command, the *Edit OmniRoute Chat Endpoint* tree action, and the Manage QuickPick entry have all been removed. Gateways that previously needed a custom chat-completions route must now be exposed behind the same `/v1` prefix as the rest of the OmniRoute API. Any pre-existing `chatEndpoint` value in user/workspace settings is ignored (harmless leftover).
+- **User-facing strings now make the `/v1` requirement explicit.** The base-URL input boxes (both the `Configure…` flow and the new `Edit Base URL` flow), the `validateBaseUrl` error message, the `baseUrl` setting description, and the README settings table all spell out that the base URL must include the `/v1` path.
+
+### Added
+
+- **`OmniRoute: Edit Base URL`** — new dedicated command (`copilot-amplify.omniroute.editBaseUrl`) for changing the OmniRoute base URL on its own, surfaced in the Providers & Models tree ACTIONS panel and the Manage QuickPick (`$(link) Edit OmniRoute Base URL`). Prompts for the URL with the `/v1` path explicit, busts the model cache on change, runs a connection test against the new host, and refreshes the tree.
+
 ## [2.1.0] - 2026-08-23
 
 Audit-driven reliability, observability and security hardening on top of the 2.0.0 architecture. No breaking changes.

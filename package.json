@@ -1,6 +1,6 @@
 {
   "name": "copilot-amplify",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
@@ -60,12 +60,7 @@
         "copilot-amplify.omniroute.baseUrl": {
           "type": "string",
           "default": "http://localhost:20128/v1",
-          "markdownDescription": "Base URL of the OmniRoute server, including the `/v1` prefix. Change this if you run OmniRoute on a different host/port."
-        },
-        "copilot-amplify.omniroute.chatEndpoint": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Custom chat-completions endpoint override. Accepts an absolute URL (`https://gateway.example.com/custom/chat`) or a path relative to the Base URL (`my-proxy/chat`). Leave empty to use the standard `{Base URL}/chat/completions`."
+          "markdownDescription": "Base URL of the OmniRoute server. **Must include the `/v1` path** (e.g. `http://localhost:20128/v1` or `https://omniroute.example.com/v1`). The chat-completions endpoint is permanently fixed at `{baseUrl}/chat/completions`. Change this if you run OmniRoute on a different host/port."
         },
         "copilot-amplify.omniroute.noCache": {
           "type": "boolean",
@@ -297,6 +292,12 @@
         "icon": "$(gear)"
       },
       {
+        "command": "copilot-amplify.omniroute.editBaseUrl",
+        "title": "OmniRoute: Edit Base URL",
+        "category": "Copilot Amplify",
+        "icon": "$(link)"
+      },
+      {
         "command": "copilot-amplify.omniroute.setApiKey",
         "title": "OmniRoute: Set API Key",
         "category": "Copilot Amplify",
@@ -319,18 +320,6 @@
         "title": "OmniRoute: Refresh Models",
         "category": "Copilot Amplify",
         "icon": "$(sync)"
-      },
-      {
-        "command": "copilot-amplify.omniroute.editChatEndpoint",
-        "title": "OmniRoute: Edit Chat Endpoint",
-        "category": "Copilot Amplify",
-        "icon": "$(edit)"
-      },
-      {
-        "command": "copilot-amplify.showDiagnostics",
-        "title": "Show Diagnostics",
-        "category": "Copilot Amplify",
-        "icon": "$(pulse)"
       },
       {
         "command": "copilot-amplify.omniroute.showDiagnostics",
