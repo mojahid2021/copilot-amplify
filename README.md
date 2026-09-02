@@ -6,12 +6,12 @@
 
 **Extend GitHub Copilot Chat with the AI providers *you* choose.**
 
-Xiaomi MiMo · Z.ai GLM · Groq · NVIDIA NIM · OmniRoute — all first-class,
+CA-Xiaomi MiMo · CA-Z.ai GLM · CA-Groq · CA-NVIDIA NIM · CA-Omniroute · CA-AgentRouter — all first-class,
 equal siblings inside the VS Code Language Model API.
 
-[![Version](https://img.shields.io/badge/version-2.1.2-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.2.0-blue)](CHANGELOG.md)
 [![VS Code Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-installed-0098FF?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=mojahid2021.copilot-amplify)
-[![Open VSX](https://img.shields.io/badge/Open_VSX-2.1.2-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
+[![Open VSX](https://img.shields.io/badge/Open_VSX-2.2.0-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
 [![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen)](#-development)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#-development)
 [![License](https://img.shields.io/badge/license-ISC-yellow)](LICENSE)
@@ -29,15 +29,15 @@ Copilot Amplify opens it up:
 
 | | |
 |---|---|
-| 🔌 **Bring your own provider** | Xiaomi MiMo, Z.ai GLM, Groq, NVIDIA NIM, and OmniRoute work out of the box |
+| 🔌 **Bring your own provider** | CA-Xiaomi MiMo, CA-Z.ai GLM, CA-Groq, CA-NVIDIA NIM, CA-Omniroute, and CA-AgentRouter work out of the box |
 | ⚖️ **No privileged provider** | Every provider is an equal sibling — no hidden routing, no forced hierarchy |
 | 🔐 **Secrets done right** | API keys live in VS Code SecretStorage (OS keychain), never in `settings.json` or logs |
 | 🧠 **Full AI capability surface** | Streaming, tool calling, reasoning/thinking output, vision input, system prompts |
 | 🛡️ **Production-grade reliability** | Retries with `Retry-After`, per-provider circuit breakers, timeouts everywhere, saturation-aware errors |
-| 🌊 **Live model catalogs** | OmniRoute discovers models from your server at runtime — new models appear without updating the extension |
+| 🌊 **Live model catalogs** | CA-Omniroute and CA-AgentRouter discover models from your server at runtime — new models appear without updating the extension |
 | 👁️ **Observable** | Unified diagnostics, per-request telemetry logs, live health states in the tree view |
 
-> **OmniRoute is a provider, not a middleman.** Its internal multi-provider
+> **CA-Omniroute is a provider, not a middleman.** Its internal multi-provider
 > routing lives entirely on the OmniRoute server; this extension only ever
 > talks to your configured base URL — exactly like any other vendor endpoint.
 
@@ -114,8 +114,12 @@ No `settings.json` edits required. Full walkthrough with copy-paste recipes:
 | **Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
 | **Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
 | **Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
-| **NVIDIA NIM** | Static (17 models) | Broad open-model catalog with transparent ID mapping |
-| **OmniRoute** | 🔄 Dynamic | Discovers models live from `GET /models`; custom chat endpoints supported; anonymous local operation |
+| **CA-Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
+| **CA-Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
+| **CA-Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
+| **CA-NVIDIA NIM** | Static (17 models) | Broad open-model catalog with transparent ID mapping |
+| **CA-Omniroute** | 🔄 Dynamic | Discovers models live from `GET /models`; custom chat endpoints supported; anonymous local operation |
+| **CA-AgentRouter** | 🔄 Dynamic | Discovers models from `GET /api/pricing`; routes Claude models to the native Anthropic `messages` API and everything else to the OpenAI-compatible endpoint; single API key covers both transports |
 
 Capabilities shown in the picker are **truthful by design** — a model is only
 advertised with vision/tools/reasoning if it actually supports them.
@@ -140,15 +144,15 @@ VS Code Language Model API
 │  Logging / Redaction Diagnostics        │
 └────────────────────┬────────────────────┘
                      │
-              Provider Registry
-                     │
-   ┌────────┬────────┼────────┬───────────┐
-   ▼        ▼        ▼        ▼           ▼
- Xiaomi    Z.ai     Groq     NVIDIA    OmniRoute
- Provider  Provider Provider Provider  Provider
-   │         │        │         │           │
-   ▼         ▼        ▼         ▼           ▼
- MiMo API  Z.ai API Groq API NVIDIA NIM OmniRoute Server
+ CA-Xiaomi  CA-Z.ai  CA-Groq  CA-NVIDIA  CA-Omni
+                     │┬─────────────┐
+   ▼        ▼        ▼        ▼           ▼             ▼
+ Xiaomi    Z.ai     Groq     NVIDIA    OmniRoute    CA-AgentRouter
+ Provider  Provider Provider Provider  Provider       Provider
+   │         │        │         │           │             │
+   ▼         ▼        ▼         ▼           ▼             ▼
+ MiMo API  Z.ai API Groq API NVIDIA NIM OmniRoute    Anthropic `/v1/messages`
+                                                 Server     + OpenAI `/v1/chat/completions`Server
                                                  │
                                      ┌───────────┼───────────┐
                                      ▼           ▼           ▼
@@ -206,7 +210,7 @@ Keys are stored via [`vscode.SecretStorage`](https://code.visualstudio.com/api/r
 Upgrading from 1.x? Plaintext settings entries are migrated automatically on
 first activation and then removed.
 
-> 💡 **OmniRoute anonymous mode:** no key needed for local servers — they work out of the box.
+> 💡 **CA-Omniroute anonymous mode:** no key needed for local servers — they work out of the box.
 
 ### General settings
 
@@ -220,21 +224,31 @@ first activation and then removed.
 | `copilot-amplify.circuitBreaker.failureThreshold` | `5` | Consecutive failures before a circuit opens |
 | `copilot-amplify.circuitBreaker.resetTimeoutSeconds` | `30` | Cooldown before a half-open probe |
 
-### OmniRoute settings
+### CA-Omniroute settings
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `copilot-amplify.omniroute.baseUrl` | `http://localhost:20128/v1` | Server base URL. **Must include the `/v1` path** (e.g. `http://localhost:20128/v1` or `https://omniroute.example.com/v1`). The chat-completions endpoint is fixed at `{baseUrl}/chat/completions`. |
-| `copilot-amplify.omniroute.noCache` | `false` | Bypass the server-side semantic cache |
-| `copilot-amplify.omniroute.noMemory` | `true` | Skip server-side memory/skills injection |
-| `copilot-amplify.omniroute.compression` | *(empty)* | Compression override (`off`, `default`, `engine:<id>`) |
-| `copilot-amplify.omniroute.sessionId` | *(empty)* | Explicit session tag for cost attribution/memory |
-| `copilot-amplify.omniroute.progress` | `false` | Opt into server progress events |
-| `copilot-amplify.omniroute.modelCacheTtlSeconds` | `300` | Model discovery cache TTL |
-| `copilot-amplify.omniroute.requestTimeoutMs` | `120000` | Chat request timeout |
-| `copilot-amplify.omniroute.discoveryTimeoutMs` | `8000` | Discovery / connection-test timeout |
-| `copilot-amplify.omniroute.warmupOnStartup` | `false` | Discover models at activation instead of first use |
-| `copilot-amplify.omniroute.logTelemetry` | `true` | Log routing/cost telemetry per request |
+| `copilot-amplify.CA-omniroute.baseUrl` | `http://localhost:20128/v1` | Server base URL. **Must include the `/v1` path** (e.g. `http://localhost:20128/v1` or `https://omniroute.example.com/v1`). The chat-completions endpoint is fixed at `{baseUrl}/chat/completions`. |
+| `copilot-amplify.CA-omniroute.noCache` | `false` | Bypass the server-side semantic cache |
+| `copilot-amplify.CA-omniroute.noMemory` | `true` | Skip server-side memory/skills injection |
+| `copilot-amplify.CA-omniroute.compression` | *(empty)* | Compression override (`off`, `default`, `engine:<id>`) |
+| `copilot-amplify.CA-omniroute.sessionId` | *(empty)* | Explicit session tag for cost attribution/memory |
+| `copilot-amplify.CA-omniroute.progress` | `false` | Opt into server progress events |
+| `copilot-amplify.CA-omniroute.modelCacheTtlSeconds` | `300` | Model discovery cache TTL |
+| `copilot-amplify.CA-omniroute.requestTimeoutMs` | `120000` | Chat request timeout |
+| `copilot-amplify.CA-omniroute.discoveryTimeoutMs` | `8000` | Discovery / connection-test timeout |
+| `copilot-amplify.CA-omniroute.warmupOnStartup` | `false` | Discover models at activation instea
+
+### CA-AgentRouter settings
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `copilot-amplify.CA-agentrouter.baseUrl` | `https://agentrouter.org/v1` | OpenAI-compatible base URL. **Must include the `/v1` path**. The Anthropic base URL is derived by stripping `/v1` (so `https://agentrouter.org`). |
+| `copilot-amplify.CA-agentrouter.cacheTtlSeconds` | `300` | How long the discovered model list stays cached before refetching `GET {baseUrl}/api/pricing`. |
+| `copilot-amplify.CA-agentrouter.requestTimeoutMs` | `120000` | Chat request timeout (covers connection + full stream) for both transports. |
+| `copilot-amplify.CA-agentrouter.discoveryTimeoutMs` | `8000` | Catalog discovery / connection-test timeout. |
+| `copilot-amplify.CA-agentrouter.warmupOnStartup` | `false` | Discover models at activation instead of first use. |d of first use |
+| `copilot-amplify.CA-omniroute.logTelemetry` | `true` | Log routing/cost telemetry per request |
 
 Base URLs are normalized — these are all equivalent, no `//v1` accidents:
 

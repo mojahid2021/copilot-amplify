@@ -11,12 +11,12 @@ import { OmnirouteChatProvider } from './provider';
 export function createOmnirouteDescriptor(): AmplifyProviderDescriptor & { id: ProviderId } {
   return {
     id: 'omniroute',
-    vendor: 'LuneCode.omniroute',
-    displayName: 'OmniRoute',
+    vendor: 'LuneCode.CA-omniroute',
+    displayName: 'CA-Omniroute',
     treeIcon: 'circuit-board',
     modelCountLabel: 'live',
     createAuth: (secrets) =>
-      new BaseAuthManager(secrets, 'copilot-amplify.omniroute.apiKey', 'OmniRoute'),
+      new BaseAuthManager(secrets, 'copilot-amplify.CA-omniroute.apiKey', 'CA-Omniroute'),
     createProvider: (auth) => new OmnirouteChatProvider(auth),
   };
 }

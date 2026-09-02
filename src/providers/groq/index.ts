@@ -19,11 +19,11 @@ class GroqChatProvider extends StaticChatProvider {
 export function createGroqDescriptor(): AmplifyProviderDescriptor & { id: ProviderId } {
   return {
     id: 'groq',
-    vendor: 'LuneCode.groq',
-    displayName: 'Groq',
+    vendor: 'LuneCode.CA-groq',
+    displayName: 'CA-Groq',
     treeIcon: 'rocket',
     modelCountLabel: GROQ_MODELS.length,
-    createAuth: (secrets) => new BaseAuthManager(secrets, 'copilot-amplify.groq.apiKey', 'Groq'),
+    createAuth: (secrets) => new BaseAuthManager(secrets, 'copilot-amplify.CA-groq.apiKey', 'CA-Groq'),
     createProvider: (auth) =>
       new GroqChatProvider(auth, {
         baseURL: BASE_URL,

@@ -13,12 +13,20 @@ import { logger } from './core/logging/logger';
 
 const log = logger.child({ component: 'secrets-migration' });
 
+/**
+ * Legacy plaintext API-key settings (pre-2.2.0) are migrated into the
+ * prefixed secret keys. The `setting` field is the (no-longer-registered)
+ * plaintext location; the `secretKey` is the new prefixed SecretStorage
+ * location. After 2.2.0 the runtime never reads `copilot-amplify.<provider>.apiKey`
+ * — only the prefixed variant.
+ */
 const LEGACY_KEYS: ReadonlyArray<{ setting: string; secretKey: string; provider: string }> = [
-  { setting: 'copilot-amplify.xiaomi.apiKey', secretKey: 'copilot-amplify.xiaomi.apiKey', provider: 'Xiaomi MiMo' },
-  { setting: 'copilot-amplify.glm.apiKey', secretKey: 'copilot-amplify.glm.apiKey', provider: 'Z.ai GLM' },
-  { setting: 'copilot-amplify.groq.apiKey', secretKey: 'copilot-amplify.groq.apiKey', provider: 'Groq' },
-  { setting: 'copilot-amplify.nvidia.apiKey', secretKey: 'copilot-amplify.nvidia.apiKey', provider: 'NVIDIA NIM' },
-  { setting: 'copilot-amplify.omniroute.apiKey', secretKey: 'copilot-amplify.omniroute.apiKey', provider: 'OmniRoute' },
+  { setting: 'copilot-amplify.xiaomi.apiKey', secretKey: 'copilot-amplify.CA-xiaomi.apiKey', provider: 'Xiaomi MiMo' },
+  { setting: 'copilot-amplify.glm.apiKey', secretKey: 'copilot-amplify.CA-glm.apiKey', provider: 'Z.ai GLM' },
+  { setting: 'copilot-amplify.groq.apiKey', secretKey: 'copilot-amplify.CA-groq.apiKey', provider: 'Groq' },
+  { setting: 'copilot-amplify.nvidia.apiKey', secretKey: 'copilot-amplify.CA-nvidia.apiKey', provider: 'NVIDIA NIM' },
+  { setting: 'copilot-amplify.CA-omniroute.apiKey', secretKey: 'copilot-amplify.CA-omniroute.apiKey', provider: 'OmniRoute' },
+  { setting: 'copilot-amplify.CA-agentrouter.apiKey', secretKey: 'copilot-amplify.CA-agentrouter.apiKey', provider: 'AgentRouter' },
 ];
 
 export interface MigrationResult {

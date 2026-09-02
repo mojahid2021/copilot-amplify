@@ -38,7 +38,7 @@ function ensureDebugSettingListener(): void {
     configListener = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration('copilot-amplify.debugLogging') ||
-        event.affectsConfiguration('copilot-amplify.omniroute.debugLogging')
+        event.affectsConfiguration('copilot-amplify.CA-omniroute.debugLogging')
       ) {
         // VS Code fires this on every settings.json keystroke. Debounce so
         // a long edit session does not thrash `minWeight` reads.
@@ -67,7 +67,7 @@ function readMinWeight(): number {
     const cfg = vscode.workspace.getConfiguration('copilot-amplify');
     const globalDebug = cfg.get<boolean>('debugLogging', false);
     const omniDebug = vscode.workspace
-      .getConfiguration('copilot-amplify.omniroute')
+      .getConfiguration('copilot-amplify.CA-omniroute')
       .get<boolean>('debugLogging', false);
     return globalDebug || omniDebug ? LEVEL_WEIGHT.debug : LEVEL_WEIGHT.info;
   } catch {

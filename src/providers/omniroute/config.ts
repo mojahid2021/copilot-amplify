@@ -5,14 +5,14 @@ import { normalizeBaseUrl } from '../../core/url';
  * Central configuration for the OmniRoute provider.
  *
  * Non-secret settings live here; the API key lives in SecretStorage
- * (`copilot-amplify.omniroute.apiKey` secret key — see auth descriptors).
+ * (`copilot-amplify.CA-omniroute.apiKey` secret key — see auth descriptors).
  *
  * OmniRoute exposes per-request controls via custom headers:
  * semantic-cache bypass, memory/skills-injection bypass, progress events,
  * session tagging and compression overrides. All are surfaced as settings.
  */
 
-const SECTION = 'copilot-amplify.omniroute';
+const SECTION = 'copilot-amplify.CA-omniroute';
 const DEFAULT_BASE_URL = 'http://localhost:20128/v1';
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
@@ -47,7 +47,7 @@ let cachedConfig: OmnirouteConfig | undefined;
 let configListener: vscode.Disposable | undefined;
 const onDidChangeEmitter = new vscode.EventEmitter<void>();
 
-/** Fired whenever any `copilot-amplify.omniroute.*` setting changes. */
+/** Fired whenever any `copilot-amplify.CA-omniroute.*` setting changes. */
 export const onDidChangeOmnirouteConfig: vscode.Event<void> = onDidChangeEmitter.event;
 
 let configChangeTimer: NodeJS.Timeout | undefined;

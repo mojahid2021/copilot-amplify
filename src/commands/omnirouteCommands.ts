@@ -16,7 +16,7 @@ import type { ProvidersTreeDataProvider } from '../ui/treeProvider';
  *   refreshModels / showDiagnostics / resetConfiguration
  */
 
-const SECTION = 'copilot-amplify.omniroute';
+const SECTION = 'copilot-amplify.CA-omniroute';
 
 export interface OmnirouteCommandDeps {
   registry: ProviderRegistry;
@@ -37,7 +37,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
   }
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot-amplify.omniroute.configure', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.configure', async () => {
       try {
         const cfg = getOmnirouteConfig();
         const auth = registry.auth('omniroute');
@@ -98,7 +98,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       }
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.editBaseUrl', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.editBaseUrl', async () => {
       try {
         const cfg = getOmnirouteConfig();
         const auth = registry.auth('omniroute');
@@ -149,13 +149,13 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       }
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.setApiKey', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.setApiKey', async () => {
       const auth = registry.auth('omniroute');
       const key = await auth.promptForApiKey();
       if (key) { tree.refresh(); }
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.removeApiKey', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.removeApiKey', async () => {
       const auth = registry.auth('omniroute');
       await auth.deleteApiKey();
       try {
@@ -165,7 +165,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       void vscode.window.showInformationMessage('OmniRoute API key removed');
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.testConnection', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.testConnection', async () => {
       const auth = registry.auth('omniroute');
       const key = await auth.getApiKey();
       const result = await vscode.window.withProgress(
@@ -188,7 +188,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       }
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.refreshModels', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.refreshModels', async () => {
       try {
         const provider = registry.provider('omniroute');
         provider.refreshCaches();
@@ -209,7 +209,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       }
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.showDiagnostics', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.showDiagnostics', async () => {
       const cfg = getOmnirouteConfig();
       const auth = registry.auth('omniroute');
       const apiKeyConfigured = Boolean(await auth.getApiKey());
@@ -232,7 +232,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       showLogChannel(true);
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.resetConfiguration', async () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.resetConfiguration', async () => {
       const choice = await vscode.window.showWarningMessage(
         'Reset all OmniRoute settings and remove its stored API key?',
         { modal: true },
@@ -265,7 +265,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
       void vscode.window.showInformationMessage('OmniRoute configuration reset to defaults');
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.omniroute.showTelemetry', () => {
+    vscode.commands.registerCommand('copilot-amplify.CA-omniroute.showTelemetry', () => {
       showLogChannel(false);
     }),
   );

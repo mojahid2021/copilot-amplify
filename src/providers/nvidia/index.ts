@@ -121,11 +121,11 @@ class NvidiaChatProvider extends StaticChatProvider {
 export function createNvidiaDescriptor(): AmplifyProviderDescriptor & { id: ProviderId } {
   return {
     id: 'nvidia',
-    vendor: 'LuneCode.nvidia',
-    displayName: 'NVIDIA NIM',
+    vendor: 'LuneCode.CA-nvidia',
+    displayName: 'CA-NVIDIA NIM',
     treeIcon: 'server',
     modelCountLabel: NIM_MODELS.length,
-    createAuth: (secrets) => new BaseAuthManager(secrets, 'copilot-amplify.nvidia.apiKey', 'NVIDIA NIM'),
+    createAuth: (secrets) => new BaseAuthManager(secrets, 'copilot-amplify.CA-nvidia.apiKey', 'CA-NVIDIA NIM'),
     createProvider: (auth) =>
       new NvidiaChatProvider(auth, {
         baseURL: BASE_URL,

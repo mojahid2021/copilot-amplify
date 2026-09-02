@@ -54,19 +54,19 @@ export function registerProviderCommands(context: vscode.ExtensionContext, deps:
         return;
       }
       if (selectedAction.action === 'telemetry') {
-        await vscode.commands.executeCommand('copilot-amplify.omniroute.showTelemetry');
+        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.showTelemetry');
         return;
       }
       if (selectedAction.action === 'omniroute-configure') {
-        await vscode.commands.executeCommand('copilot-amplify.omniroute.configure');
+        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.configure');
         return;
       }
       if (selectedAction.action === 'omniroute-baseurl') {
-        await vscode.commands.executeCommand('copilot-amplify.omniroute.editBaseUrl');
+        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
         return;
       }
       if (selectedAction.action === 'omniroute-diagnostics') {
-        await vscode.commands.executeCommand('copilot-amplify.omniroute.showDiagnostics');
+        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.showDiagnostics');
         return;
       }
 

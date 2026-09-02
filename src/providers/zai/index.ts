@@ -19,12 +19,12 @@ class GlmChatProvider extends StaticChatProvider {
 export function createZaiDescriptor(): AmplifyProviderDescriptor & { id: ProviderId } {
   return {
     id: 'glm',
-    vendor: 'LuneCode.glm',
-    displayName: 'Z.ai GLM',
+    vendor: 'LuneCode.CA-glm',
+    displayName: 'CA-Z.ai GLM',
     treeIcon: 'hubot',
     modelCountLabel: GLM_MODELS.length,
     createAuth: (secrets) =>
-      new BaseAuthManager(secrets, 'copilot-amplify.glm.apiKey', 'Z.ai GLM', 'glm-chat-provider.apiKey'),
+      new BaseAuthManager(secrets, 'copilot-amplify.CA-glm.apiKey', 'CA-Z.ai GLM', 'glm-chat-provider.apiKey'),
     createProvider: (auth) =>
       new GlmChatProvider(auth, {
         baseURL: BASE_URL,

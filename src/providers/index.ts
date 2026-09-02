@@ -12,6 +12,7 @@ import { createZaiDescriptor } from './zai';
 import { createGroqDescriptor } from './groq';
 import { createNvidiaDescriptor } from './nvidia';
 import { createOmnirouteDescriptor } from './omniroute/descriptor';
+import { createAgentrouterDescriptor } from './agentrouter/descriptor';
 
 export type { ProviderId, AmplifyProviderDescriptor, ProviderHealth, ConnectionTestResult, ProviderTreeModel } from '../core/provider/registry';
 export { ProviderRegistry } from '../core/provider/registry';
@@ -23,8 +24,9 @@ export function createProviderRegistry(secrets: vscode.SecretStorage): ProviderR
   registry.register(createGroqDescriptor());
   registry.register(createNvidiaDescriptor());
   registry.register(createOmnirouteDescriptor());
+  registry.register(createAgentrouterDescriptor());
   return registry;
 }
 
 /** Provider ids in stable display order (used by QuickPicks and the tree). */
-export const PROVIDER_ORDER = ['xiaomi', 'glm', 'groq', 'nvidia', 'omniroute'] as const;
+export const PROVIDER_ORDER = ['xiaomi', 'glm', 'groq', 'nvidia', 'omniroute', 'agentrouter'] as const;

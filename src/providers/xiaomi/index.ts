@@ -22,12 +22,12 @@ class XiaomiChatProvider extends StaticChatProvider {
 export function createXiaomiDescriptor(): AmplifyProviderDescriptor & { id: ProviderId } {
   return {
     id: 'xiaomi',
-    vendor: 'LuneCode.xiaomi',
-    displayName: 'Xiaomi MiMo',
+    vendor: 'LuneCode.CA-xiaomi',
+    displayName: 'CA-Xiaomi MiMo',
     treeIcon: 'device-mobile',
     modelCountLabel: MIMO_MODELS.length,
     createAuth: (secrets) =>
-      new BaseAuthManager(secrets, 'copilot-amplify.xiaomi.apiKey', 'Xiaomi MiMo', 'xiaomi-mimo.apiKey'),
+      new BaseAuthManager(secrets, 'copilot-amplify.CA-xiaomi.apiKey', 'CA-Xiaomi MiMo', 'xiaomi-mimo.apiKey'),
     createProvider: (auth) =>
       new XiaomiChatProvider(auth, {
         baseURL: BASE_URL,

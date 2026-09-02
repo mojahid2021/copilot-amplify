@@ -11,7 +11,7 @@ import type { BaseChatProvider } from './baseChatProvider';
  * Adding a provider means adding a descriptor; no core logic changes.
  */
 
-export type ProviderId = 'xiaomi' | 'glm' | 'groq' | 'nvidia' | 'omniroute';
+export type ProviderId = 'xiaomi' | 'glm' | 'groq' | 'nvidia' | 'omniroute' | 'agentrouter';
 
 /** Capabilities the UI (tree, diagnostics) needs from any provider. */
 export interface ProviderTreeModel {

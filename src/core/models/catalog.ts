@@ -71,6 +71,32 @@ const NVIDIA_THINKING_CONFIGURATION: LanguageModelConfigurationSchema = {
   },
 };
 
+/**
+ * Thinking-effort schema for Claude models surfaced through AgentRouter.
+ *
+ * The Anthropic `messages` API exposes thinking as a binary `thinking` block
+ * (enabled/disabled) plus an explicit `budget_tokens` allocation — there is
+ * no enum-style "low / high / max" knob like the OpenAI-compatible path
+ * offers. The picker therefore exposes a binary toggle; the budget is a
+ * fixed default inside the provider implementation.
+ */
+export const AGENTROUTER_CLAUDE_THINKING_CONFIGURATION: LanguageModelConfigurationSchema = {
+  properties: {
+    reasoningEffort: {
+      type: 'string',
+      title: 'Thinking',
+      enum: ['none', 'high'],
+      enumItemLabels: ['Disabled', 'Enabled'],
+      enumDescriptions: [
+        'Disable Claude extended thinking for faster, lower-latency responses',
+        'Enable Claude extended thinking — the model allocates reasoning tokens before answering',
+      ],
+      default: 'high',
+      group: 'navigation',
+    },
+  },
+};
+
 export const MIMO_MODELS: vscode.LanguageModelChatInformation[] = [
   {
     id: 'mimo-v2.5-pro',

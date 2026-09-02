@@ -346,7 +346,7 @@ function maybeWarmup(provider: OmnirouteChatProvider): void {
   let warmupOnStartup: boolean;
   try {
     warmupOnStartup = vscode.workspace
-      .getConfiguration('copilot-amplify.omniroute')
+      .getConfiguration('copilot-amplify.CA-omniroute')
       .get<boolean>('warmupOnStartup', false);
   } catch {
     return;
