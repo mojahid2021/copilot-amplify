@@ -95,6 +95,9 @@ function sleep(ms: number, token?: vscode.CancellationToken): Promise<void> {
       cancelDisposable.dispose();
       resolve();
     }, ms);
+    // Don't keep the process alive on shutdown while a backoff is pending —
+    // VS Code may be tearing the extension down between retries.
+    timer.unref?.();
     const cancelDisposable =
       token?.onCancellationRequested(() => {
         clearTimeout(timer);

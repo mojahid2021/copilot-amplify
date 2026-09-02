@@ -13,6 +13,13 @@ export class BaseAuthManager implements vscode.Disposable {
 
   readonly onDidChangeApiKey = this.onDidChangeApiKeyEmitter.event;
 
+  /**
+   * Cached value of the most recent `getApiKey()` lookup. Hot-path chat
+   * requests can satisfy the lookup without two `secrets.get` round trips
+   * per call. Cleared whenever the key is mutated.
+   */
+  private cachedKey?: string;
+
   constructor(
     private readonly secrets: vscode.SecretStorage,
     private readonly secretKey: string,
@@ -22,23 +29,33 @@ export class BaseAuthManager implements vscode.Disposable {
 
   dispose(): void {
     this.onDidChangeApiKeyEmitter.dispose();
+    this.cachedKey = undefined;
   }
 
   async getApiKey(): Promise<string | undefined> {
+    // Hot path: most chat calls arrive in quick succession and the same
+    // key keeps being used. Cache avoids two `secrets.get` reads per call.
+    if (this.cachedKey !== undefined) {
+      return this.cachedKey;
+    }
     const key = await this.secrets.get(this.secretKey);
     if (key) {
+      this.cachedKey = key;
       return key;
     }
     if (this.legacySecretKey) {
       const legacyKey = await this.secrets.get(this.legacySecretKey);
       if (legacyKey) {
         // One-time migration: copy to current key, drop legacy entry.
+        // The migration happens on the first read after activation; reads
+        // made BEFORE this branch (because the cache is empty) are rare.
         try {
           await this.secrets.store(this.secretKey, legacyKey);
           await this.secrets.delete(this.legacySecretKey);
         } catch {
           /* storage failures must not break request paths */
         }
+        this.cachedKey = legacyKey;
         return legacyKey;
       }
     }
@@ -52,6 +69,7 @@ export class BaseAuthManager implements vscode.Disposable {
       deletions.push(this.secrets.delete(this.legacySecretKey));
     }
     await Promise.all(deletions);
+    this.cachedKey = undefined;
     this.onDidChangeApiKeyEmitter.fire();
   }
 
@@ -79,6 +97,7 @@ export class BaseAuthManager implements vscode.Disposable {
 
     const key = input.trim();
     await this.secrets.store(this.secretKey, key);
+    this.cachedKey = key;
     this.onDidChangeApiKeyEmitter.fire();
     vscode.window.showInformationMessage(`${this.displayName} API key saved successfully`);
     return key;

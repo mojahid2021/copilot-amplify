@@ -30,6 +30,8 @@ export async function testOmnirouteConnection(args: ConnectionTestArgs): Promise
   const cfg = getOmnirouteConfig();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), cfg.discoveryTimeoutMs);
+  // Don't keep the process alive on shutdown while the probe is pending.
+  timer.unref?.();
   const started = Date.now();
 
   try {

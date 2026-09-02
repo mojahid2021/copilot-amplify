@@ -235,6 +235,30 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     return 'high';
   }
 
+  /**
+   * Provider-specific default `maxTokens` (output token cap) for a given
+   * model id. Used as a fallback when neither the caller nor the model
+   * catalog supplies a value. Returning `undefined` means "no override,
+   * use the catalog default".
+   */
+  protected getDefaultMaxOutputTokens(_modelId: string): number | undefined {
+    void _modelId;
+    return undefined;
+  }
+
+  /**
+   * Provider-specific default sampling temperature for a given model id.
+   * Returning `undefined` means "no override, use the catalog / SDK default".
+   *
+   * Reasoning-oriented models (QwQ, GLM-NIM, DeepSeek-R1, etc.) often
+   * produce unstable tool-call JSON at T=1.0; subclasses can pin them
+   * to a more stable value here.
+   */
+  protected getDefaultTemperature(_modelId: string): number | undefined {
+    void _modelId;
+    return undefined;
+  }
+
   private readonly _disposables: vscode.Disposable[] = [];
 
   constructor(protected readonly authManager: BaseAuthManager) {
@@ -248,6 +272,13 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   }
 
   public dispose(): void {
+    // Clear the client cache so any sockets held by `GenericApiClient` are
+    // released as soon as the provider is dropped. The clients themselves
+    // don't own long-lived sockets, but the cache entries keep references
+    // alive otherwise.
+    this.clientCache.clear();
+    // Reset the breaker so a future instantiation starts from a clean slate.
+    this._breaker?.reset();
     for (const d of this._disposables) {
       d.dispose();
     }
@@ -258,9 +289,12 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
   }
 
   protected getOrCreateClient(apiKey: string): GenericApiClient {
-    let client = this.clientCache.get(apiKey);
+    // Normalize so trailing whitespace / minor variants share a single client
+    // and we don't open a new socket per re-paste.
+    const cacheKey = apiKey.trim();
+    let client = this.clientCache.get(cacheKey);
     if (!client) {
-      client = this.getApiClient(apiKey);
+      client = this.getApiClient(cacheKey);
       // Bound the cache: keys change rarely, so a small LRU-style bound is safe.
       if (this.clientCache.size >= 8) {
         const oldest = this.clientCache.keys().next();
@@ -268,7 +302,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
           this.clientCache.delete(oldest.value);
         }
       }
-      this.clientCache.set(apiKey, client);
+      this.clientCache.set(cacheKey, client);
     }
     return client;
   }
@@ -363,12 +397,25 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     let streamError: unknown;
 
     const maxTokensOption = getNumberModelOption(options, 'maxTokens');
+    // Per-model default output cap, falling back to the catalog value, then
+    // 4096. Subclasses (e.g. NVIDIA NIM) can override via getDefaultMaxOutputTokens
+    // to keep model-specific caps in sync with the live API.
+    const perModelDefaultMax = this.getDefaultMaxOutputTokens(model.id);
+    const resolvedMaxTokens = maxTokensOption
+      ?? perModelDefaultMax
+      ?? model.maxOutputTokens
+      ?? 4096;
+    // Per-model default temperature; subclasses can pin reasoning models to
+    // a more stable value here. When undefined, we omit the field so the
+    // OpenAI client's default applies (the OpenAI SDK requires `temperature`
+    // to be a finite number, not undefined).
+    const perModelDefaultTemp = this.getDefaultTemperature(model.id);
     const preparedMessages = prepareContextMessages(
       messages,
       model.capabilities.imageInput === true,
       {
         maxInputTokens: model.maxInputTokens ?? 128000,
-        reserveOutputTokens: maxTokensOption ?? model.maxOutputTokens ?? 4096,
+        reserveOutputTokens: resolvedMaxTokens,
       },
     );
 
@@ -381,7 +428,8 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
         this.mapModelId(model.id),
         preparedMessages,
         {
-          maxTokens: maxTokensOption,
+          maxTokens: resolvedMaxTokens,
+          ...(perModelDefaultTemp !== undefined ? { temperature: perModelDefaultTemp } : {}),
           tools: model.capabilities.toolCalling ? convertTools(options.tools) : undefined,
           toolChoice:
             model.capabilities.toolCalling && options.tools?.length

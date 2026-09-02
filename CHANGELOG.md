@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.1.2] - 2026-09-03
+
+Catalog expansion for the NVIDIA NIM provider. No breaking changes, no new settings, no API changes — every addition is a new model in the static catalog surfaced through the existing chat pipeline.
+
+### Added
+
+- **NVIDIA NIM catalog refresh.** The `NIM_MODELS` array and the NVIDIA provider id map have been rebuilt to match the user's intended lineup. The 2.1.1-era NIM catalog is fully replaced; the new lineup is exactly the set of models explicitly registered through user requests in this release cycle.
+
+- **`kimi-k3` — Moonshot Kimi K3 (`moonshotai/kimi-k3`).** Vision-capable, 262k context, 16k max output, tool-calling. Exposes a dedicated **`NVIDIA_THINKING_CONFIGURATION`** schema (`None / High / Max`) so the user can pick a reasoning tier from the picker. Wired to both `REASONING_MODEL_IDS` and `THINKING_MODEL_IDS` in the NVIDIA provider, which:
+  - Pins `temperature: 0.7` for tool-call JSON stability (same rationale as QwQ/GLM-NIM).
+  - Forwards the chosen tier as the standard `reasoning_effort` field on the wire (via `applyOptionalParams` in `src/core/api/client.ts`).
+
+- **`deepseek-v4-pro-0813` — DeepSeek V4 Pro 08-13 (`deepseek-ai/deepseek-v4-pro-0813`).** Text-only, tool-calling, 1M context, 16k max output. Surfaced as "DeepSeek V4 Pro (08-13)" so it is distinguishable from the (now removed) generic `deepseek-v4-pro` entry. The model uses DeepSeek V4's `chat_template_kwargs.thinking` reasoning form rather than the `reasoning_effort` enum, so it is intentionally not added to `REASONING_MODEL_IDS` / `THINKING_MODEL_IDS` — adding it would send `reasoning_effort` on the wire and conflict with the model's expected `chat_template_kwargs` form.
+
+- **`deepseek-v4-flash-0731` — DeepSeek V4 Flash 07-31 (`deepseek-ai/deepseek-v4-flash-0731`).** Text-only, tool-calling, 1M context, 16k max output. Surfaced as "DeepSeek V4 Flash (07-31)" to keep the two DeepSeek V4 variants adjacent and distinguishable. Same `chat_template_kwargs` reasoning form as the Pro variant — no `reasoning_effort` plumbing.
+
+- **`laguna-xs-2.1` — Poolside Laguna XS 2.1 (`poolside/laguna-xs-2.1`).** Text-only, tool-calling, 262k context, 8k max output. The upstream snippet uses a plain `temperature: 1, top_p: 0.95, max_tokens: 8192` call with no reasoning plumbing, so the model is registered without a `configurationSchema` and without membership in the reasoning/thinking sets — `temperature: 1` is preserved on the wire.
+
+- **`minimax-m3` — MiniMax M3 (`minimaxai/minimax-m3`).** Vision-capable, tool-calling, 1M context, 8k max output. Plain-call registration, same rationale as Laguna XS 2.1.
+
+- **`nemotron-3-ultra-550b-a55b` — NVIDIA Nemotron 3 Ultra 550B (`nvidia/nemotron-3-ultra-550b-a55b`).** Text-only, tool-calling, 1M context, 16k max output. Reasoning is gated by `chat_template_kwargs.enable_thinking` (Nemotron's chat-template flag, distinct from DeepSeek V4's `chat_template_kwargs.thinking` field), so no `reasoning_effort` plumbing — the model's reasoning form would conflict with the standard enum-based wiring.
+
+- **`gemma-4-31b-it` — Google Gemma 4 31B IT (`google/gemma-4-31b-it`).** Vision-capable, tool-calling, 262k context, 8k max output. Same `chat_template_kwargs.enable_thinking` reasoning form as Nemotron 3 Ultra, same registration rationale.
+
+- **`gpt-oss-120b` — OpenAI GPT-OSS 120B (`openai/gpt-oss-120b`).** Text-only, tool-calling, 131k context, 65k max output. The model is a reasoning model (its responses include a `reasoning_content` field) but the request side needs no explicit reasoning toggle — the upstream snippet is a plain `temperature: 1, top_p: 1, max_tokens: 4096` call. Registered without a `configurationSchema` and outside the reasoning/thinking sets so the snippet's `temperature: 1, top_p: 1` defaults pass through unchanged.
+
+- **`mistral-nemotron` — Mistral Nemotron (`mistralai/mistral-nemotron`).** Text-only, tool-calling, 32k context, 4k max output. The upstream snippet is a plain `temperature: 0.6, top_p: 0.7, max_tokens: 4096` call with no reasoning plumbing. Registered without a `configurationSchema` and outside the reasoning/thinking sets so the snippet's deliberate `temperature: 0.6, top_p: 0.7` values pass through unchanged.
+
+- **`NVIDIA_THINKING_CONFIGURATION` — new per-family thinking-effort schema.** Defined in `src/core/models/catalog.ts` next to the existing `GLM_*` and `QWQ_*` schemas, exposing `enum: ['none', 'high', 'max']` with NVIDIA-flavored labels and descriptions. Mirrors the per-family ownership pattern already in place for GLM and QwQ rather than sharing one schema across families, so labels and descriptions can match NVIDIA NIM's vocabulary exactly.
+
+### Removed
+
+- **Pre-2.1.2 NIM catalog trimmed.** The following entries (and their id-map rows) were removed as part of the catalog refresh: `gemma-3-27b-it`, `nemotron-3-super-120b-a12b`, `deepseek-v4-flash`, `deepseek-v4-pro`, `llama-3.3-70b-instruct`, `mistral-large-2-123b-instruct-2512`, `qwen3-coder-480b-a35b-instruct`, `granite-3.3-8b-instruct`, `qwq-32b`, `step-3.5-flash`, `step-3.7-flash`, `kimi-k2.6`, `devstral-2-123b-instruct-2512`, `falcon3-7b-instruct`, `laguna-xs-2.1` (v1.0 line), and `gpt-oss-120b` (v1 entry). The `GLM_5_2_THINKING_CONFIGURATION` and `QWQ_THINKING_CONFIGURATION` schemas (orphaned after their sole consumers were dropped) were also removed. The Z.ai `GLM_MODELS` array — owned by the Z.ai provider — is unchanged.
+
+### Notes
+
+- **No new settings, no new commands, no new transport plumbing.** Every addition flows through the existing `NIM_MODELS` → `NvidiaChatProvider` → `GenericApiClient` path; only catalog entries, id-map rows, and the `NVIDIA_THINKING_CONFIGURATION` schema are new.
+- **Provider tree view automatically reflects the new model list.** `listModelsForTree` reads from `NIM_MODELS` directly, so no provider-side changes are needed for the new entries to appear in the Copilot Chat picker.
+- **Idempotent in-flight call path.** Streaming, retry, circuit breaker, and diagnostics layers are untouched and apply to the new models exactly as they did for the removed ones.
+
 ## [2.1.1] - 2026-08-27
 
 ### Changed

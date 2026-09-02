@@ -9,9 +9,9 @@
 Xiaomi MiMo · Z.ai GLM · Groq · NVIDIA NIM · OmniRoute — all first-class,
 equal siblings inside the VS Code Language Model API.
 
-[![Version](https://img.shields.io/badge/version-2.1.1-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.1.2-blue)](CHANGELOG.md)
 [![VS Code Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-installed-0098FF?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=mojahid2021.copilot-amplify)
-[![Open VSX](https://img.shields.io/badge/Open_VSX-2.1.1-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
+[![Open VSX](https://img.shields.io/badge/Open_VSX-2.1.2-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
 [![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen)](#-development)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#-development)
 [![License](https://img.shields.io/badge/license-ISC-yellow)](LICENSE)

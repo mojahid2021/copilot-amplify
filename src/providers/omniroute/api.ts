@@ -4,7 +4,7 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from 'openai/resources/chat/completions/completions';
 import type * as vscode from 'vscode';
-import { ApiError, GenericApiClient, customFetch, type ChatOptions, type GenericMessage } from '../../core/api/client';
+import { ApiError, GenericApiClient, customFetch, streamingChatFetch, type ChatOptions, type GenericMessage } from '../../core/api/client';
 import { parseSseStream } from '../../core/api/sse';
 import { joinEndpoint, normalizeBaseUrl } from '../../core/url';
 import { getOmnirouteConfig, getOmnirouteBaseUrl } from './config';
@@ -114,10 +114,26 @@ function logResponseTelemetry(response: Response, requestModel: string): void {
       (name) => response.headers.get(name) ?? '',
       requestModel,
     );
+    // Rate-limit to one log line per second. A busy chat session can
+    // produce dozens of responses per minute; writing one log line per
+    // response overwhelms the output channel and the user.
+    if (!shouldLogResponseTelemetry()) {
+      return;
+    }
     log.info(`[response] ${formatOmnirouteTelemetry(record)}`);
   } catch {
     /* telemetry is best-effort */
   }
+}
+
+let lastTelemetryAt = 0;
+function shouldLogResponseTelemetry(): boolean {
+  const now = Date.now();
+  if (now - lastTelemetryAt < 1000) {
+    return false;
+  }
+  lastTelemetryAt = now;
+  return true;
 }
 
 export class OmnirouteApiClient extends GenericApiClient {
@@ -132,6 +148,10 @@ export class OmnirouteApiClient extends GenericApiClient {
     });
     this.apiKey = apiKey;
     this.sessionId = options?.sessionId?.trim() || undefined;
+    // OmniRoute customFetch is the non-keep-alive variant: this client is
+    // used for short-lived calls (model discovery, connection test) where
+    // we want the socket to close once the response is consumed. Streaming
+    // chat requests below opt into keep-alive explicitly.
     this.fetchImpl = options?.fetchImpl ?? customFetch;
   }
 
@@ -202,17 +222,19 @@ export class OmnirouteApiClient extends GenericApiClient {
       () => abortController.abort(),
       getOmnirouteConfig().requestTimeoutMs,
     );
+    requestTimeout.unref?.();
     const cancellationDisposable = cancellationToken?.onCancellationRequested(() =>
       abortController.abort(),
     );
 
     try {
-      const response = await this.fetchImpl(this.getEndpoint('/chat/completions'), {
+      // Long-lived stream: use keep-alive to amortize TLS/TCP handshakes
+      // across token chunks.
+      const response = await streamingChatFetch(this.getEndpoint('/chat/completions'), {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(this.buildBody(model, messages, options, true)),
         signal: abortController.signal,
-        keepalive: true,
       });
 
       if (getOmnirouteConfig().logTelemetry) {
@@ -243,6 +265,14 @@ export class OmnirouteApiClient extends GenericApiClient {
 
       for await (const event of parseSseStream(response.body)) {
         if (cancellationToken?.isCancellationRequested) {
+          // Cancel the underlying body reader so we stop reading from the
+          // network immediately. Otherwise the upstream connection keeps
+          // pumping chunks into the void until the server-side timeout.
+          try {
+            await response.body?.cancel();
+          } catch {
+            /* best-effort */
+          }
           return;
         }
         if (event && typeof event === 'object' && 'error' in event) {
@@ -272,14 +302,16 @@ export class OmnirouteApiClient extends GenericApiClient {
       () => abortController.abort(),
       getOmnirouteConfig().requestTimeoutMs,
     );
+    requestTimeout.unref?.();
 
     try {
+      // Short-lived fallback: no keep-alive so the socket closes after the
+      // response body is consumed.
       const response = await this.fetchImpl(this.getEndpoint('/chat/completions'), {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(this.buildBody(model, messages, options, false)),
         signal: abortController.signal,
-        keepalive: true,
       });
 
       if (getOmnirouteConfig().logTelemetry) {

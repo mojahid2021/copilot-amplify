@@ -13,7 +13,22 @@ import { match } from 'ts-pattern';
 
 // Node's `agent` option is silently ignored by undici's global fetch; the
 // dispatcher below already pools connections. Passing it only misled readers.
+//
+// `keepalive: true` is NOT a default: it keeps idle TCP sockets around
+// indefinitely, which silently inflates the extension's FD count over a long
+// VS Code session. Streaming chat requests opt in explicitly via
+// {@link streamingChatFetch}; short-lived probes (connection test, model
+// discovery, telemetry) leave the default off so their sockets close as soon
+// as the response body is consumed.
 export const customFetch = (url: string | URL | unknown, init?: RequestInit): Promise<Response> =>
+  fetch(url as Parameters<typeof fetch>[0], { ...init });
+
+/**
+ * Fetch variant used by long-lived streaming chat requests — keeps the TCP
+ * connection warm between tokens so we are not paying handshake cost for
+ * every chunk. Should NOT be used for short-lived requests.
+ */
+export const streamingChatFetch = (url: string | URL | unknown, init?: RequestInit): Promise<Response> =>
   fetch(url as Parameters<typeof fetch>[0], { ...init, keepalive: true });
 
 /** Default chat-request timeout applied when a caller does not specify one. */
@@ -131,7 +146,12 @@ export class GenericApiClient {
     this.client = new OpenAI({
       apiKey,
       baseURL,
-      fetch: options.fetchImpl ?? customFetch,
+      // Streaming chats benefit from keep-alive; the OpenAI SDK uses this
+      // fetch for every request, so we default to the keep-alive variant
+      // here. Provider-specific clients (e.g. OmniRoute) override this
+      // through `options.fetchImpl` with their own non-keep-alive fetch for
+      // short-lived calls like discovery and connection tests.
+      fetch: options.fetchImpl ?? streamingChatFetch,
       // Explicit caller timeouts win (OmniRoute); otherwise apply the shared
       // user-configured default so no chat request can hang indefinitely.
       timeout: options.timeoutMs ?? readRequestTimeoutMs(),

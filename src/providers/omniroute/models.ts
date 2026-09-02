@@ -245,6 +245,8 @@ export interface FetchModelsArgs {
   timeoutMs: number;
   token?: vscode.CancellationToken;
   fetchImpl?: typeof fetch;
+  /** External abort signal — when aborted, the request is canceled cooperatively. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -254,7 +256,17 @@ export interface FetchModelsArgs {
 export async function fetchOmnirouteModels(args: FetchModelsArgs): Promise<MappedOmnirouteModel[]> {
   const abortController = new AbortController();
   const timeout = setTimeout(() => abortController.abort(), args.timeoutMs);
+  timeout.unref?.();
   const cancellationDisposable = args.token?.onCancellationRequested(() => abortController.abort());
+  // Bridge the external signal into our internal AbortController.
+  const onExternalAbort = () => abortController.abort();
+  if (args.signal) {
+    if (args.signal.aborted) {
+      abortController.abort();
+    } else {
+      args.signal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
 
   try {
     const endpoint = joinEndpoint(args.baseUrl, '/models');
@@ -289,6 +301,7 @@ export async function fetchOmnirouteModels(args: FetchModelsArgs): Promise<Mappe
     throw error; // AbortError / network errors handled by callers
   } finally {
     clearTimeout(timeout);
+    args.signal?.removeEventListener('abort', onExternalAbort);
     cancellationDisposable?.dispose();
   }
 }

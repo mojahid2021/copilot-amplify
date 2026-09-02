@@ -44,23 +44,44 @@ export interface OmnirouteConfig {
 }
 
 let cachedConfig: OmnirouteConfig | undefined;
-let listenerInstalled = false;
+let configListener: vscode.Disposable | undefined;
 const onDidChangeEmitter = new vscode.EventEmitter<void>();
 
 /** Fired whenever any `copilot-amplify.omniroute.*` setting changes. */
 export const onDidChangeOmnirouteConfig: vscode.Event<void> = onDidChangeEmitter.event;
 
-function ensureListener(): void {
-  if (listenerInstalled) {
+let configChangeTimer: NodeJS.Timeout | undefined;
+function scheduleConfigInvalidate(): void {
+  if (configChangeTimer) {
     return;
   }
-  listenerInstalled = true;
-  vscode.workspace.onDidChangeConfiguration((event) => {
+  // VS Code fires this on every settings.json keystroke. Debounce so a long
+  // edit session does not invalidate the cache or fire listeners per keystroke.
+  configChangeTimer = setTimeout(() => {
+    configChangeTimer = undefined;
+    cachedConfig = undefined;
+    onDidChangeEmitter.fire();
+  }, 250);
+  configChangeTimer.unref?.();
+}
+
+function ensureListener(): void {
+  if (configListener) {
+    return;
+  }
+  // Tracked so `disposeOmnirouteConfig()` can detach it on extension shutdown.
+  configListener = vscode.workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration(SECTION)) {
-      cachedConfig = undefined;
-      onDidChangeEmitter.fire();
+      scheduleConfigInvalidate();
     }
   });
+}
+
+/** Detach the configuration listener — call once on extension deactivation. */
+export function disposeOmnirouteConfig(): void {
+  configListener?.dispose();
+  configListener = undefined;
+  onDidChangeEmitter.dispose();
 }
 
 function positiveNumber(value: number | undefined, fallback: number): number {

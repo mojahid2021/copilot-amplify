@@ -49,6 +49,14 @@ function appendThinkingSegment(segment: string, insideThinking: boolean): string
 // If the partial buffer grows beyond this, it can't be a valid tag prefix — flush it.
 const MAX_TAG_LENGTH = 10;
 
+/**
+ * Hard cap on the partial-tag buffer. A misbehaving model that emits a
+ * `<think>` (or `<thought>`) tag but never closes it would otherwise grow
+ * `state.buffer` for the entire response. Once the buffer reaches this cap
+ * we flush it as regular content so the loop terminates.
+ */
+const MAX_PARTIAL_BUFFER_CHARS = 4096;
+
 export function processThinkingContent(content: string, state: ThinkingState): { output: string; state: ThinkingState } {
   if (
     !state.insideThinking
@@ -81,6 +89,14 @@ export function processThinkingContent(content: string, state: ThinkingState): {
     // Safety: if the buffered partial match exceeds the maximum tag length,
     // it can't be a valid tag — flush the entire buffer as regular content.
     if (partialSuffixLength >= MAX_TAG_LENGTH) {
+      output += buffer;
+      buffer = '';
+      continue;
+    }
+
+    // Hard cap: a model that opens <think>/<thought> and never closes it
+    // would otherwise keep accumulating here. Flush as content and reset.
+    if (buffer.length > MAX_PARTIAL_BUFFER_CHARS) {
       output += buffer;
       buffer = '';
       continue;

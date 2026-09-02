@@ -44,6 +44,8 @@ export abstract class StaticChatProvider
     const started = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+    // Don't keep the process alive on shutdown while the probe is pending.
+    timer.unref?.();
     try {
       const response = await fetch(joinEndpoint(this.baseURL, '/models'), {
         headers: { Authorization: `Bearer ${apiKey}` },

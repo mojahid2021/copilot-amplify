@@ -25,22 +25,41 @@ export const REDACTED = '[REDACTED]';
 
 let channel: vscode.OutputChannel | undefined;
 let minWeight = LEVEL_WEIGHT.info;
+let configListener: vscode.Disposable | undefined;
 
 function ensureDebugSettingListener(): void {
+  if (configListener) {
+    return;
+  }
   // Refresh level threshold when the user flips debug logging.
-  // Registered once per extension host; harmless if VS Code fires it often.
+  // Registered once per extension host; the disposable is tracked so
+  // `disposeLogChannel()` can detach it on extension deactivation.
   try {
-    vscode.workspace.onDidChangeConfiguration((event) => {
+    configListener = vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration('copilot-amplify.debugLogging') ||
         event.affectsConfiguration('copilot-amplify.omniroute.debugLogging')
       ) {
-        minWeight = readMinWeight();
+        // VS Code fires this on every settings.json keystroke. Debounce so
+        // a long edit session does not thrash `minWeight` reads.
+        scheduleMinWeightRefresh();
       }
     });
   } catch {
     /* workspace API unavailable in some hosts — logging still works */
   }
+}
+
+let minWeightRefreshTimer: NodeJS.Timeout | undefined;
+function scheduleMinWeightRefresh(): void {
+  if (minWeightRefreshTimer) {
+    return;
+  }
+  minWeightRefreshTimer = setTimeout(() => {
+    minWeightRefreshTimer = undefined;
+    minWeight = readMinWeight();
+  }, 250);
+  minWeightRefreshTimer.unref?.();
 }
 
 function readMinWeight(): number {
@@ -69,8 +88,10 @@ function getChannel(): vscode.OutputChannel {
  * Redact sensitive material from arbitrary log data.
  * - Object/array values: keys matching sensitive patterns are censored.
  * - Strings: `Bearer <value>` sequences are censored inline.
+ * - Cyclic references are broken via a `WeakSet` so a chained
+ *   `error.cause = error` does not blow the recursion budget.
  */
-export function redact(value: unknown, depth = 0): unknown {
+export function redact(value: unknown, depth = 0, seen: WeakSet<object> = new WeakSet()): unknown {
   if (depth > 6) {
     return '[depth limit]';
   }
@@ -78,15 +99,23 @@ export function redact(value: unknown, depth = 0): unknown {
     return value.replace(BEARER_PATTERN, `Bearer ${REDACTED}`);
   }
   if (value instanceof Error) {
-    return `${value.name}: ${redact(value.message, depth + 1)}`;
+    return `${value.name}: ${redact(value.message, depth + 1, seen)}`;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => redact(item, depth + 1));
+    if (seen.has(value)) {
+      return '[cycle]';
+    }
+    seen.add(value);
+    return value.map((item) => redact(item, depth + 1, seen));
   }
   if (value && typeof value === 'object') {
+    if (seen.has(value)) {
+      return '[cycle]';
+    }
+    seen.add(value);
     const out: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(value)) {
-      out[key] = SENSITIVE_KEY_PATTERN.test(key) ? REDACTED : redact(val, depth + 1);
+      out[key] = SENSITIVE_KEY_PATTERN.test(key) ? REDACTED : redact(val, depth + 1, seen);
     }
     return out;
   }
@@ -154,6 +183,12 @@ export function showLogChannel(preserveFocus = true): void {
 
 /** Dispose the underlying output channel (called on extension shutdown). */
 export function disposeLogChannel(): void {
+  if (minWeightRefreshTimer) {
+    clearTimeout(minWeightRefreshTimer);
+    minWeightRefreshTimer = undefined;
+  }
+  configListener?.dispose();
+  configListener = undefined;
   channel?.dispose();
   channel = undefined;
 }

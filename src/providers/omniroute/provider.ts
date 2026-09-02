@@ -38,6 +38,9 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
   private lastConnectionTest?: { ok: boolean; message: string; latencyMs?: number; at: number };
   private retryTimer?: NodeJS.Timeout;
   private retryDelayMs = 10_000;
+  /** Cap on consecutive discovery failures before we give up and wait for a manual refresh. */
+  private static readonly MAX_DISCOVERY_ATTEMPTS = 10;
+  private discoveryAttempts = 0;
 
   constructor(authManager: BaseAuthManager) {
     super(authManager);
@@ -58,6 +61,7 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
       this.retryTimer = undefined;
     }
     this.retryDelayMs = 10_000;
+    this.discoveryAttempts = 0;
     this.modelCache.invalidateAll();
     clearOmnirouteModelCapabilities();
     this.lastDiscoveryError = undefined;
@@ -124,13 +128,33 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
     if (this.retryTimer) {
       return;
     }
+    // Give up after the configured cap so a permanently misconfigured server
+    // does not consume background CPU/network forever. The user can recover
+    // by running "Refresh Providers & Models" or by editing a setting
+    // (which clears `lastDiscoveryError` via `invalidateModelCache`).
+    if (this.discoveryAttempts >= OmnirouteChatProvider.MAX_DISCOVERY_ATTEMPTS) {
+      log.warn('discovery retries exhausted; waiting for manual refresh', {
+        attempts: this.discoveryAttempts,
+      });
+      return;
+    }
+    // Skip scheduling when the breaker is already open — the breaker will
+    // gate the next attempt anyway, so a separate timer is pure overhead.
+    if (this.getCircuitState() === 'open') {
+      return;
+    }
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
       void this.discoverAndCache();
     }, this.retryDelayMs);
+    // Allow the process to exit cleanly even if the timer is still pending.
+    this.retryTimer.unref?.();
     // Exponential backoff up to 60s
     this.retryDelayMs = Math.min(this.retryDelayMs * 1.5, 60_000);
   }
+
+  /** Permanent (non-retryable) HTTP statuses that should not schedule a retry. */
+  private static readonly PERMANENT_FAILURE_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 404, 410, 421]);
 
   /**
    * One coalesced discovery round. Failures schedule a backoff retry but never
@@ -138,12 +162,13 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
    */
   private async discoverAndCache(): Promise<vscode.LanguageModelChatInformation[]> {
     try {
-      const models = await this.modelCache.getOrFetch('models', async () => {
+      const models = await this.modelCache.getOrFetch('models', async (signal) => {
         const apiKey = (await this.authManager.getApiKey()) || undefined;
         const discovered = await fetchOmnirouteModels({
           baseUrl: getOmnirouteBaseUrl(),
           apiKey,
           timeoutMs: getOmnirouteConfig().discoveryTimeoutMs,
+          signal,
         });
         if (!discovered.length) {
           throw new Error('OmniRoute did not return any chat-capable models');
@@ -162,20 +187,41 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
         return discovered.map((m) => m.info);
       });
       this.retryDelayMs = 10_000;
+      this.discoveryAttempts = 0;
       this.lastDiscoveryError = undefined;
       this.breaker.recordSuccess();
       this.fireModelInformationChanged();
       return models;
     } catch (error) {
       const details = error instanceof Error ? error.message : String(error);
-      this.lastDiscoveryError = details;
-      this.lastDiscoveryStatus =
+      const status =
         error instanceof ApiError && error.statusCode > 0 ? error.statusCode : undefined;
+      this.lastDiscoveryError = details;
+      this.lastDiscoveryStatus = status;
       this.breaker.recordFailure();
-      log.warn('model discovery failed', { error: details });
-      this.scheduleDiscoveryRetry();
+      log.warn('model discovery failed', { error: details, status });
+      // Only schedule a backoff retry for transient failures. Auth and
+      // not-found errors will not get better by themselves — waiting and
+      // hammering the server is wasteful.
+      const isPermanent =
+        status !== undefined && OmnirouteChatProvider.PERMANENT_FAILURE_STATUSES.has(status);
+      if (!isPermanent) {
+        this.discoveryAttempts += 1;
+        this.scheduleDiscoveryRetry();
+      } else {
+        this.discoveryAttempts = OmnirouteChatProvider.MAX_DISCOVERY_ATTEMPTS;
+      }
       throw error;
     }
+  }
+
+  /** Stop any pending background work — call before dropping the provider. */
+  override dispose(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = undefined;
+    }
+    super.dispose();
   }
 
   private async getModels(apiKeyHint?: string): Promise<vscode.LanguageModelChatInformation[]> {
@@ -306,6 +352,8 @@ function maybeWarmup(provider: OmnirouteChatProvider): void {
     return;
   }
   if (warmupOnStartup) {
-    setTimeout(() => void provider.warmupNow().catch(() => {}), 0);
+    const timer = setTimeout(() => void provider.warmupNow().catch(() => {}), 0);
+    // Don't keep the process alive on shutdown while the warmup is pending.
+    timer.unref?.();
   }
 }
