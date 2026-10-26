@@ -143,14 +143,19 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
     if (this.getCircuitState() === 'open') {
       return;
     }
+    // Exponential backoff with jitter, capped at 60s. Jitter prevents
+    // thundering herds when multiple providers retry simultaneously.
+    const baseDelay = Math.min(this.retryDelayMs * 1.5, 60_000);
+    const jitter = Math.floor(Math.random() * baseDelay * 0.2); // ±20%
+    const delay = Math.min(baseDelay + jitter, 60_000);
+
     this.retryTimer = setTimeout(() => {
       this.retryTimer = undefined;
       void this.discoverAndCache();
-    }, this.retryDelayMs);
+    }, delay);
     // Allow the process to exit cleanly even if the timer is still pending.
     this.retryTimer.unref?.();
-    // Exponential backoff up to 60s
-    this.retryDelayMs = Math.min(this.retryDelayMs * 1.5, 60_000);
+    this.retryDelayMs = baseDelay;
   }
 
   /** Permanent (non-retryable) HTTP statuses that should not schedule a retry. */

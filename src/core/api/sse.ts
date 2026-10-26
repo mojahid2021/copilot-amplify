@@ -47,11 +47,14 @@ export class SseParser {
 
   private drainLines(): SseEvent[] {
     const events: SseEvent[] = [];
-    let newlineIndex: number;
-    while ((newlineIndex = this.buffer.indexOf('\n')) >= 0) {
-      const line = this.buffer.slice(0, newlineIndex).replace(/\r$/, '');
-      this.buffer = this.buffer.slice(newlineIndex + 1);
-      const event = this.parseLine(line);
+    // Split on all available newlines at once (faster than a per-line
+    // indexOf loop for long responses). CRLF/LF both handled by trimming
+    // trailing '\r' per line.
+    const lines = this.buffer.split('\n');
+    // Keep the final incomplete line in the buffer; process all complete lines.
+    this.buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      const event = this.parseLine(line.replace(/\r$/, ''));
       if (event) {
         events.push(event);
       }

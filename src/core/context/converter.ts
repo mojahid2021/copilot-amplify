@@ -5,6 +5,10 @@ import type { GenericContentPart, GenericMessage, GenericTool, GenericToolCall }
 
 const textDecoder = new TextDecoder();
 
+// Pre-compiled RegExp patterns — avoids recompiling on every tool delta call.
+const MARKDOWN_FENCE_START = /^```(?:json)?\s*/i;
+const MARKDOWN_FENCE_END = /\s*```\s*$/;
+
 interface PendingMessageState {
   contentParts: GenericContentPart[];
   toolCalls: GenericToolCall[];
@@ -42,7 +46,7 @@ export function parseToolArguments(argumentsText: string): Record<string, unknow
 
   // Strip markdown code block wrappers if present
   if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    cleaned = cleaned.replace(MARKDOWN_FENCE_START, '').replace(MARKDOWN_FENCE_END, '').trim();
   }
 
   const parsed = secureJsonParse.safeParse(cleaned);

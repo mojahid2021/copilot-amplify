@@ -110,6 +110,40 @@ export function prepareContextMessages(
     }
   }
 
+  // Last-resort: if a single message still exceeds the budget (e.g., one very
+  // long user turn), trim content from the beginning so we stay within limits.
+  // We preserve the tail of the message since it is most likely to be relevant.
+  while (nonSystemMsgs.length > 0 && totalTokens > budget) {
+    const target = nonSystemMsgs[0];
+    if (!target) break;
+
+    const excess = totalTokens - budget;
+    if (typeof target.content === 'string') {
+      const charBudget = Math.max(0, target.content.length - Math.ceil(excess * 3.8));
+      if (charBudget > 0) {
+        target.content = target.content.slice(target.content.length - charBudget);
+      } else {
+        nonSystemMsgs.shift();
+      }
+    } else if (Array.isArray(target.content)) {
+      // Drop text parts from oldest to newest until we fit.
+      let dropped = false;
+      for (let i = 0; i < target.content.length && totalTokens > budget; i++) {
+        const part = target.content[i];
+        if (!part) continue;
+        if (part.type === 'text') {
+          target.content.splice(i, 1);
+          i--;
+          dropped = true;
+        }
+      }
+      if (!dropped) nonSystemMsgs.shift();
+    }
+
+    totalTokens = nonSystemMsgs.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
+    if (totalTokens <= budget) break;
+  }
+
   // Ensure sequence does not start with an orphaned tool message
   while (nonSystemMsgs.length > 1 && nonSystemMsgs[0]?.role === 'tool') {
     nonSystemMsgs.shift();

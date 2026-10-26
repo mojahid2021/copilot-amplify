@@ -6,38 +6,48 @@ export interface ThinkingState {
   insideThinking: boolean;
 }
 
-function findFirstTagIndex(buffer: string, isClosing: boolean): { index: number; tagLength: number } {
-  const lower = buffer.toLowerCase();
-  const tags = isClosing ? ['</think>', '</thought>'] : ['<think>', '<thought>'];
+// Pre-computed lowercased tag markers so we never recompute them per call.
+const OPEN_TAGS_LOWER = ['<details>', '<thought>'].map((t) => t.toLowerCase());
+const CLOSE_TAGS_LOWER = ['</details>', '</thought>'].map((t) => t.toLowerCase());
+
+/**
+ * Find the earliest opening tag match in `lower` (already lowercased).
+ * Returns { index, tagLength } or { index: -1, tagLength: 0 } when none found.
+ */
+function findFirstTagIndex(lower: string, tagsLower: string[]): { index: number; tagLength: number } {
   let bestIndex = -1;
   let bestTagLength = 0;
-
-  for (const tag of tags) {
+  for (let i = 0; i < tagsLower.length; i++) {
+    const tag = tagsLower[i];
+    if (!tag) continue;
     const idx = lower.indexOf(tag);
     if (idx >= 0 && (bestIndex === -1 || idx < bestIndex)) {
       bestIndex = idx;
       bestTagLength = tag.length;
     }
   }
-
   return { index: bestIndex, tagLength: bestTagLength };
 }
 
-function getPartialSuffixLength(buffer: string, isClosing: boolean): number {
-  const lower = buffer.toLowerCase();
-  const tags = isClosing ? ['</think>', '</thought>'] : ['<think>', '<thought>'];
+/**
+ * Find the longest suffix of `lower` that is a prefix of any tag.
+ * `lower` must already be lowercased.
+ */
+function getPartialSuffixLength(lower: string, tagsLower: string[]): number {
   let maxMatch = 0;
-
-  for (const tag of tags) {
-    const maxCheck = Math.min(lower.length, tag.length - 1);
-    for (let i = maxCheck; i > 0; i--) {
-      if (tag.startsWith(lower.slice(-i))) {
-        maxMatch = Math.max(maxMatch, i);
+  const bufLen = lower.length;
+  for (let i = 0; i < tagsLower.length; i++) {
+    const tag = tagsLower[i];
+    if (!tag) continue;
+    const maxCheck = Math.min(bufLen, tag.length - 1);
+    // Walk suffixes longest-first; first match wins for this tag.
+    for (let s = maxCheck; s > 0; s--) {
+      if (tag.startsWith(lower.slice(bufLen - s))) {
+        maxMatch = Math.max(maxMatch, s);
         break;
       }
     }
   }
-
   return maxMatch;
 }
 
@@ -71,7 +81,10 @@ export function processThinkingContent(content: string, state: ThinkingState): {
   let insideThinking = state.insideThinking;
 
   while (buffer.length > 0) {
-    const { index: markerIndex, tagLength } = findFirstTagIndex(buffer, insideThinking);
+    // Lowercase once per buffer iteration instead of per tag check.
+    const lower = buffer.toLowerCase();
+    const tagsLower = insideThinking ? CLOSE_TAGS_LOWER : OPEN_TAGS_LOWER;
+    const { index: markerIndex, tagLength } = findFirstTagIndex(lower, tagsLower);
     if (markerIndex >= 0) {
       output += appendThinkingSegment(buffer.slice(0, markerIndex), insideThinking);
       buffer = buffer.slice(markerIndex + tagLength);
@@ -79,7 +92,7 @@ export function processThinkingContent(content: string, state: ThinkingState): {
       continue;
     }
 
-    const partialSuffixLength = getPartialSuffixLength(buffer, insideThinking);
+    const partialSuffixLength = getPartialSuffixLength(lower, tagsLower);
     if (partialSuffixLength === 0) {
       output += buffer;
       buffer = '';

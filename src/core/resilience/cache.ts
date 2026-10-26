@@ -16,6 +16,7 @@ interface Entry<V> {
 interface InflightEntry {
   controller: AbortController;
   promise: Promise<unknown>;
+  onSharedAbort: () => void;
 }
 
 /**
@@ -44,6 +45,8 @@ export class CancelledDuringFetchError extends Error {
 export class TTLCache<V> {
   private readonly entries = new Map<string, Entry<V>>();
   private readonly inflight = new Map<string, InflightEntry>();
+  /** Shared abort controller so `invalidateAll()` cancels every inflight fetch through one signal. */
+  private sharedAbort = new AbortController();
 
   constructor(
     private readonly defaultTtlMs: number,
@@ -82,8 +85,9 @@ export class TTLCache<V> {
     }
 
     const controller = new AbortController();
-    // Forward the caller's signal into the shared controller.
+    // Forward the caller's signal AND the shared abort signal into the shared controller.
     const onCallerAbort = () => controller.abort();
+    const onSharedAbort = () => controller.abort();
     if (signal) {
       if (signal.aborted) {
         controller.abort();
@@ -91,6 +95,7 @@ export class TTLCache<V> {
         signal.addEventListener('abort', onCallerAbort, { once: true });
       }
     }
+    this.sharedAbort.signal.addEventListener('abort', onSharedAbort, { once: true });
 
     const promise = fetch(controller.signal)
       .then((value) => {
@@ -103,12 +108,13 @@ export class TTLCache<V> {
       })
       .finally(() => {
         signal?.removeEventListener('abort', onCallerAbort);
+        this.sharedAbort.signal.removeEventListener('abort', onSharedAbort);
         if (this.inflight.get(key)?.promise === promise) {
           this.inflight.delete(key);
         }
       });
 
-    this.inflight.set(key, { controller, promise });
+    this.inflight.set(key, { controller, promise, onSharedAbort });
     return promise;
   }
 
@@ -159,6 +165,7 @@ export class TTLCache<V> {
     if (inflight) {
       inflight.controller.abort();
       this.inflight.delete(key);
+      this.sharedAbort.signal.removeEventListener('abort', inflight.onSharedAbort);
     }
   }
 
@@ -169,8 +176,13 @@ export class TTLCache<V> {
    */
   invalidateAll(): void {
     this.entries.clear();
+    // Abort all inflight fetches via the shared controller in one shot,
+    // then rotate the shared controller so new fetches aren't affected.
+    this.sharedAbort.abort();
+    const oldShared = this.sharedAbort;
+    this.sharedAbort = new AbortController();
     for (const entry of this.inflight.values()) {
-      entry.controller.abort();
+      oldShared.signal.removeEventListener('abort', entry.onSharedAbort);
     }
     this.inflight.clear();
   }
