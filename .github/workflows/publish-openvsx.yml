@@ -1,4 +1,4 @@
-name: Publish to Open VSX
+name: Publish Extension
 
 on:
   push:
@@ -27,6 +27,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: '*.vsix'
+
+      - name: Publish to VS Code Marketplace
+        run: npx vsce publish --pat ${{ secrets.VSCE_PAT }} --packagePath *.vsix
 
       - name: Publish to Open VSX
         run: npx ovsx publish *.vsix --pat ${{ secrets.OPENVSX_TOKEN }}

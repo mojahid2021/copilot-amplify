@@ -74,6 +74,10 @@ Performance, UI, and reliability release. Eliminates excess CPU and IPC overhead
 
 - **`getModels()` private method** removed from both dynamic providers.
 
+### CI / CD
+
+- **`.github/workflows/publish-openvsx.yml`** — GitHub Actions workflow triggered by `v*` tag pushes. Builds the `.vsix`, attaches it as a release asset on the matching GitHub Release, publishes to **VS Code Marketplace** via `VSCE_PAT`, and publishes to **Open VSX** via `OPENVSX_TOKEN`. Both registries are now fully automated — pushing a tag is the only manual step required.
+
 ### Notes
 
 - `warmupOnStartup` setting still works as the one permitted automatic fetch path (opt-in, default `false`). It now also respects the API key / server URL gate — no network call fires if the prerequisite is unmet.

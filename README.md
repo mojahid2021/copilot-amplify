@@ -9,9 +9,10 @@
 CA-Xiaomi MiMo · CA-Z.ai GLM · CA-Groq · CA-NVIDIA NIM · CA-Omniroute · CA-AgentRouter — all first-class,
 equal siblings inside the VS Code Language Model API.
 
-[![Version](https://img.shields.io/badge/version-2.2.0-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-2.3.0-blue)](CHANGELOG.md)
 [![VS Code Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-installed-0098FF?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=mojahid2021.copilot-amplify)
-[![Open VSX](https://img.shields.io/badge/Open_VSX-2.2.0-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
+[![Open VSX](https://img.shields.io/badge/Open_VSX-2.3.0-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
+[![Publish Extension](https://github.com/mojahid2021/copilot-amplify/actions/workflows/publish-openvsx.yml/badge.svg)](https://github.com/mojahid2021/copilot-amplify/actions/workflows/publish-openvsx.yml)
 [![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen)](#-development)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#-development)
 [![License](https://img.shields.io/badge/license-ISC-yellow)](LICENSE)
@@ -111,9 +112,6 @@ No `settings.json` edits required. Full walkthrough with copy-paste recipes:
 
 | Provider | Catalog | Highlights |
 |---|---|---|
-| **Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
-| **Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
-| **Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
 | **CA-Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
 | **CA-Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
 | **CA-Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
@@ -333,17 +331,7 @@ normalization, secrets migration, and a cross-provider contract suite.
 
 ### Publishing
 
-Releases go to both registries:
-
-```bash
-npm run package                          # build copilot-amplify-<version>.vsix
-
-# VS Code Marketplace (publisher: mojahid2021)
-npx vsce publish
-
-# Open VSX (VSCodium, Gitpod, and other VS Code forks)
-npx ovsx publish --pat <OPEN_VSX_PAT>
-```
+Push a version tag — CI publishes to both registries and attaches the `.vsix` to the GitHub Release automatically. See `PUBLISHING.md` (not committed) for the full release checklist and secret setup.
 
 ## 🤝 Contributing
 
