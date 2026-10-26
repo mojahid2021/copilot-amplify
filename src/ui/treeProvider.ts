@@ -202,6 +202,12 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
       const healthyIcon = !degraded && (hasKey || isOmni);
       const item = new vscode.TreeItem(descriptor.displayName, vscode.TreeItemCollapsibleState.None) as ProviderTreeItem;
 
+      // @ts-ignore TreeItemBadge not exported in current @types/vscode version; runtime supports it
+      item.badge = hasKey ? undefined : {
+        value: '⚠',
+        tooltip: 'No API key configured — click the row to set key'
+      };
+
       item.providerId = descriptor.id;
       item.contextValue = 'provider';
       item.description = `${statusTxt}${health?.detail && degraded ? ` — ${health.detail}` : ''}  ·  ${countTxt}`;
