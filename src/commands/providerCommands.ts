@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import type { ProviderRegistry } from '../core/provider/registry';
 import { buildAmplifyDiagnostics, showTextReport } from '../core/diagnostics';
 import type { ProvidersTreeDataProvider, ProviderTreeItem, ModelTreeItem } from '../ui/treeProvider';
+import { isOmnirouteBaseUrlConfigured } from '../providers/omniroute/config';
 
 /**
  * General provider commands (all providers, preserved from 1.x):
@@ -101,12 +102,61 @@ export function registerProviderCommands(context: vscode.ExtensionContext, deps:
           /* lazy instantiation failures are non-fatal here */
         }
       }
-      // Re-discover OmniRoute models eagerly so the picker updates immediately.
-      try {
-        void (registry.provider('omniroute') as unknown as { warmupNow?(): Promise<unknown> }).warmupNow?.().catch(() => {});
-      } catch {
-        /* discovery errors surface via health */
+      // Re-discover dynamic provider models eagerly on explicit refresh.
+      for (const id of ['omniroute', 'agentrouter'] as const) {
+        try {
+          void (registry.provider(id) as unknown as { loadModels?(): Promise<unknown> }).loadModels?.().catch(() => {});
+        } catch {
+          /* discovery errors surface via health */
+        }
       }
+      tree.refresh();
+    }),
+
+    vscode.commands.registerCommand('copilot-amplify.loadModels', async (item?: ProviderTreeItem) => {
+      const id = item?.providerId;
+      if (!id || !registry.has(id)) { return; }
+
+      // OmniRoute requires a user-configured server URL; all others require a key.
+      if (id === 'omniroute') {
+        if (!isOmnirouteBaseUrlConfigured()) {
+          const choice = await vscode.window.showInformationMessage(
+            'OmniRoute server URL is not configured.',
+            'Set Server URL',
+          );
+          if (choice === 'Set Server URL') {
+            await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
+            tree.refresh();
+          }
+          return;
+        }
+      } else {
+        const auth = registry.auth(id as never);
+        const key = await auth.getApiKey();
+        if (!key) {
+          const choice = await vscode.window.showInformationMessage(
+            `${registry.get(id as never)?.displayName ?? id} requires an API key to load models.`,
+            'Set API Key',
+          );
+          if (choice === 'Set API Key') {
+            await auth.promptForApiKey();
+            tree.refresh();
+          }
+          return;
+        }
+      }
+
+      const provider = registry.provider(id as never) as unknown as { loadModels?(): Promise<void> };
+      if (!provider.loadModels) { return; }
+      const displayName = registry.get(id as never)?.displayName ?? id;
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Loading ${displayName} models…`, cancellable: false },
+        () => provider.loadModels!().catch((err: unknown) => {
+          void vscode.window.showErrorMessage(
+            `Failed to load models: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }),
+      );
       tree.refresh();
     }),
 
@@ -121,9 +171,18 @@ export function registerProviderCommands(context: vscode.ExtensionContext, deps:
     vscode.commands.registerCommand('copilot-amplify.provider.click', async (item: ProviderTreeItem) => {
       const id = item?.providerId;
       if (!id || !registry.has(id)) { return; }
+      if (id === 'omniroute') {
+        if (!isOmnirouteBaseUrlConfigured()) {
+          await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
+          tree.refresh();
+        } else {
+          await runTestConnection(registry, tree, id, registry.get(id)?.displayName ?? id);
+        }
+        return;
+      }
       const auth = registry.auth(id);
       const key = await auth.getApiKey();
-      if (key || id === 'omniroute') {
+      if (key) {
         await runTestConnection(registry, tree, id, registry.get(id)?.displayName ?? id);
       } else {
         await auth.promptForApiKey();
@@ -213,7 +272,19 @@ async function runTestConnection(
   } catch {
     return;
   }
-  if (id !== 'omniroute') {
+  if (id === 'omniroute') {
+    if (!isOmnirouteBaseUrlConfigured()) {
+      const choice = await vscode.window.showInformationMessage(
+        'OmniRoute server URL is not configured.',
+        'Set Server URL',
+      );
+      if (choice === 'Set Server URL') {
+        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
+        tree.refresh();
+      }
+      return;
+    }
+  } else {
     const auth = registry.auth(id as never);
     if (!(await auth.getApiKey())) {
       const choice = await vscode.window.showInformationMessage(

@@ -19,7 +19,7 @@ import {
   stripNoThinkingPrefix,
 } from './models';
 import { clearOmnirouteModelCapabilities, omnirouteModelAdvertisesThinking, registerOmnirouteModelCapabilities } from './modelRegistry';
-import { getOmnirouteBaseUrl, getOmnirouteConfig, onDidChangeOmnirouteConfig } from './config';
+import { getOmnirouteBaseUrl, getOmnirouteConfig, isOmnirouteBaseUrlConfigured, onDidChangeOmnirouteConfig } from './config';
 import { testOmnirouteConnection } from './connectionTest';
 
 const log = logger.child({ provider: 'OmniRoute' });
@@ -36,11 +36,7 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
   private lastDiscoveryError?: string;
   private lastDiscoveryStatus?: number;
   private lastConnectionTest?: { ok: boolean; message: string; latencyMs?: number; at: number };
-  private retryTimer?: NodeJS.Timeout;
-  private retryDelayMs = 10_000;
-  /** Cap on consecutive discovery failures before we give up and wait for a manual refresh. */
-  private static readonly MAX_DISCOVERY_ATTEMPTS = 10;
-  private discoveryAttempts = 0;
+  private lastKnownModelIds: ReadonlySet<string> = new Set();
 
   constructor(authManager: BaseAuthManager) {
     super(authManager);
@@ -56,15 +52,10 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
   }
 
   public invalidateModelCache(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = undefined;
-    }
-    this.retryDelayMs = 10_000;
-    this.discoveryAttempts = 0;
     this.modelCache.invalidateAll();
     clearOmnirouteModelCapabilities();
     this.lastDiscoveryError = undefined;
+    this.lastKnownModelIds = new Set();
   }
 
   /** ── AmplifyProviderFacet ─────────────────────────────────────────────── */
@@ -99,6 +90,9 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
   }
 
   health(): ProviderHealth {
+    if (!isOmnirouteBaseUrlConfigured()) {
+      return { configured: false, status: 'setup-required', detail: 'Set server URL to load models' };
+    }
     const fresh = this.modelCache.has('models');
     if (this.lastDiscoveryError && !fresh) {
       const status =
@@ -111,7 +105,7 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
     }
     const detail = fresh
       ? `${this.modelCache.peek('models')?.length ?? 0} models`
-      : 'Models not discovered yet';
+      : 'Not loaded';
     if (this.getCircuitState() === 'open') {
       return { configured: true, status: 'error', detail: `${detail} · circuit open (cooling down)` };
     }
@@ -124,47 +118,9 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
 
   /** ── Discovery ─────────────────────────────────────────────────────────── */
 
-  private scheduleDiscoveryRetry(): void {
-    if (this.retryTimer) {
-      return;
-    }
-    // Give up after the configured cap so a permanently misconfigured server
-    // does not consume background CPU/network forever. The user can recover
-    // by running "Refresh Providers & Models" or by editing a setting
-    // (which clears `lastDiscoveryError` via `invalidateModelCache`).
-    if (this.discoveryAttempts >= OmnirouteChatProvider.MAX_DISCOVERY_ATTEMPTS) {
-      log.warn('discovery retries exhausted; waiting for manual refresh', {
-        attempts: this.discoveryAttempts,
-      });
-      return;
-    }
-    // Skip scheduling when the breaker is already open — the breaker will
-    // gate the next attempt anyway, so a separate timer is pure overhead.
-    if (this.getCircuitState() === 'open') {
-      return;
-    }
-    // Exponential backoff with jitter, capped at 60s. Jitter prevents
-    // thundering herds when multiple providers retry simultaneously.
-    const baseDelay = Math.min(this.retryDelayMs * 1.5, 60_000);
-    const jitter = Math.floor(Math.random() * baseDelay * 0.2); // ±20%
-    const delay = Math.min(baseDelay + jitter, 60_000);
-
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = undefined;
-      void this.discoverAndCache();
-    }, delay);
-    // Allow the process to exit cleanly even if the timer is still pending.
-    this.retryTimer.unref?.();
-    this.retryDelayMs = baseDelay;
-  }
-
-  /** Permanent (non-retryable) HTTP statuses that should not schedule a retry. */
+  /** Permanent (non-retryable) HTTP statuses. */
   private static readonly PERMANENT_FAILURE_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 404, 410, 421]);
 
-  /**
-   * One coalesced discovery round. Failures schedule a backoff retry but never
-   * throw into VS Code's LM API.
-   */
   private async discoverAndCache(): Promise<vscode.LanguageModelChatInformation[]> {
     try {
       const models = await this.modelCache.getOrFetch('models', async (signal) => {
@@ -191,11 +147,16 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
         }
         return discovered.map((m) => m.info);
       });
-      this.retryDelayMs = 10_000;
-      this.discoveryAttempts = 0;
       this.lastDiscoveryError = undefined;
       this.breaker.recordSuccess();
-      this.fireModelInformationChanged();
+      const newIds = new Set(models.map((m) => m.id));
+      const changed =
+        newIds.size !== this.lastKnownModelIds.size ||
+        [...newIds].some((id) => !this.lastKnownModelIds.has(id));
+      if (changed) {
+        this.lastKnownModelIds = newIds;
+        this.fireModelInformationChanged();
+      }
       return models;
     } catch (error) {
       const details = error instanceof Error ? error.message : String(error);
@@ -205,62 +166,40 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
       this.lastDiscoveryStatus = status;
       this.breaker.recordFailure();
       log.warn('model discovery failed', { error: details, status });
-      // Only schedule a backoff retry for transient failures. Auth and
-      // not-found errors will not get better by themselves — waiting and
-      // hammering the server is wasteful.
-      const isPermanent =
-        status !== undefined && OmnirouteChatProvider.PERMANENT_FAILURE_STATUSES.has(status);
-      if (!isPermanent) {
-        this.discoveryAttempts += 1;
-        this.scheduleDiscoveryRetry();
-      } else {
-        this.discoveryAttempts = OmnirouteChatProvider.MAX_DISCOVERY_ATTEMPTS;
-      }
       throw error;
     }
   }
 
-  /** Stop any pending background work — call before dropping the provider. */
-  override dispose(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = undefined;
-    }
-    super.dispose();
-  }
-
-  private async getModels(apiKeyHint?: string): Promise<vscode.LanguageModelChatInformation[]> {
-    void apiKeyHint;
-    try {
-      return await this.discoverAndCache();
-    } catch {
-      // Stale-while-error: keep serving the previous list when available.
-      return this.modelCache.peekStale('models') ?? [];
-    }
-  }
-
-  /** Manual discovery trigger used by warmup and refresh commands. */
+  /** Manual discovery trigger — used by warmup, refresh commands, and the "Load Models" button. */
   async warmupNow(): Promise<vscode.LanguageModelChatInformation[]> {
+    // Never attempt discovery without an explicitly configured server URL.
+    if (!isOmnirouteBaseUrlConfigured()) {
+      return this.modelCache.peekStale('models') ?? [];
+    }
     try {
       return await this.discoverAndCache();
     } catch {
       return this.modelCache.peekStale('models') ?? [];
     }
+  }
+
+  /** User-initiated model load — called from the "Load Models" tree item button. */
+  async loadModels(): Promise<void> {
+    await this.warmupNow();
   }
 
   /** ── Language Model API surface ────────────────────────────────────────── */
 
   override async provideLanguageModelChatInformation(
-    options: vscode.PrepareLanguageModelChatModelOptions,
+    _options: vscode.PrepareLanguageModelChatModelOptions,
     token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelChatInformation[]> {
     if (token.isCancellationRequested) {
       return [];
     }
-    // `options.silent` is irrelevant here: OmniRoute supports anonymous access,
-    // so discovery never needs to prompt the user.
-    void options;
-    return this.getModels();
+    // Never trigger a network call here — VS Code calls this on every internal
+    // model-list refresh. Return the stale cache; the user loads models manually.
+    return this.modelCache.peekStale('models') ?? [];
   }
 
   override async provideLanguageModelChatResponse(
@@ -272,8 +211,6 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
   ): Promise<void> {
     const apiKey = (await this.authManager.getApiKey()) || 'omniroute';
     try {
-      // Anonymous access: never prompt. The inherited runChatOperation applies
-      // retry + the shared per-provider circuit breaker and records the outcome.
       await this.runChatOperation(
         () =>
           this.streamResponse(
@@ -300,10 +237,6 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
     return new OmnirouteApiClient(apiKey);
   }
 
-  /**
-   * VS Code calls us with the encoded id (`auto__best-coding`). Decode before
-   * forwarding and resolve no-thinking variants to the real upstream id.
-   */
   protected override mapModelId(modelId: string): string {
     return resolveOmnirouteUpstreamModelId(modelId);
   }
@@ -326,7 +259,6 @@ export class OmnirouteChatProvider extends BaseChatProvider implements AmplifyPr
   ): ThinkingOption | undefined {
     void _modelId;
     void _options;
-    // Omit custom Anthropic-style 'thinking' payload for the OpenAI-compatible endpoint.
     return undefined;
   }
 
@@ -358,7 +290,6 @@ function maybeWarmup(provider: OmnirouteChatProvider): void {
   }
   if (warmupOnStartup) {
     const timer = setTimeout(() => void provider.warmupNow().catch(() => {}), 0);
-    // Don't keep the process alive on shutdown while the warmup is pending.
     timer.unref?.();
   }
 }

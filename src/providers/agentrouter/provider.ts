@@ -48,6 +48,7 @@ import {
   AGENTROUTER_DISPLAY_NAME,
   AGENTROUTER_SETTINGS_SECTION,
 } from './descriptor';
+import { getGlobalConfig } from '../../core/globalConfig';
 
 const log = logger.child({ provider: AGENTROUTER_DISPLAY_NAME });
 
@@ -70,10 +71,7 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
   private lastDiscoveryError?: string;
   private lastDiscoveryStatus?: number;
   private lastConnectionTest?: { ok: boolean; message: string; latencyMs?: number; at: number };
-  private retryTimer?: NodeJS.Timeout;
-  private retryDelayMs = 10_000;
-  private static readonly MAX_DISCOVERY_ATTEMPTS = 10;
-  private discoveryAttempts = 0;
+  private lastKnownModelIds: ReadonlySet<string> = new Set();
 
   /** Per-API-key client caches. Bounded by the base class — see `BaseChatProvider.clientCache`. */
   private readonly anthropicClientCache = new Map<string, AnthropicApiClient>();
@@ -93,15 +91,10 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
   }
 
   public invalidateModelCache(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = undefined;
-    }
-    this.retryDelayMs = 10_000;
-    this.discoveryAttempts = 0;
     this.modelCache.invalidateAll();
     this.transportByModel.clear();
     this.lastDiscoveryError = undefined;
+    this.lastKnownModelIds = new Set();
   }
 
   /** ── AmplifyProviderFacet ─────────────────────────────────────────────── */
@@ -148,7 +141,7 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
     }
     const detail = fresh
       ? `${this.modelCache.peek('models')?.length ?? 0} models`
-      : 'Models not discovered yet';
+      : 'Not loaded';
     if (this.getCircuitState() === 'open') {
       return { configured: true, status: 'error', detail: `${detail} · circuit open (cooling down)` };
     }
@@ -160,29 +153,6 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
   }
 
   /** ── Discovery ─────────────────────────────────────────────────────────── */
-
-  private scheduleDiscoveryRetry(): void {
-    if (this.retryTimer) {
-      return;
-    }
-    if (this.discoveryAttempts >= AgentrouterChatProvider.MAX_DISCOVERY_ATTEMPTS) {
-      log.warn('discovery retries exhausted; waiting for manual refresh', {
-        attempts: this.discoveryAttempts,
-      });
-      return;
-    }
-    if (this.getCircuitState() === 'open') {
-      return;
-    }
-    this.retryTimer = setTimeout(() => {
-      this.retryTimer = undefined;
-      void this.discoverAndCache();
-    }, this.retryDelayMs);
-    this.retryTimer.unref?.();
-    this.retryDelayMs = Math.min(this.retryDelayMs * 1.5, 60_000);
-  }
-
-  private static readonly PERMANENT_FAILURE_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 404, 410, 421]);
 
   private async discoverAndCache(): Promise<vscode.LanguageModelChatInformation[]> {
     try {
@@ -201,11 +171,16 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
         }
         return buildAgentrouterCatalog(discovered.values());
       });
-      this.retryDelayMs = 10_000;
-      this.discoveryAttempts = 0;
       this.lastDiscoveryError = undefined;
       this.breaker.recordSuccess();
-      this.fireModelInformationChanged();
+      const newIds = new Set(models.map((m) => m.id));
+      const changed =
+        newIds.size !== this.lastKnownModelIds.size ||
+        [...newIds].some((id) => !this.lastKnownModelIds.has(id));
+      if (changed) {
+        this.lastKnownModelIds = newIds;
+        this.fireModelInformationChanged();
+      }
       return models;
     } catch (error) {
       const details = error instanceof Error ? error.message : String(error);
@@ -215,19 +190,17 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
       this.lastDiscoveryStatus = status;
       this.breaker.recordFailure();
       log.warn('model discovery failed', { error: details, status });
-      const isPermanent =
-        status !== undefined && AgentrouterChatProvider.PERMANENT_FAILURE_STATUSES.has(status);
-      if (!isPermanent) {
-        this.discoveryAttempts += 1;
-        this.scheduleDiscoveryRetry();
-      } else {
-        this.discoveryAttempts = AgentrouterChatProvider.MAX_DISCOVERY_ATTEMPTS;
-      }
       throw error;
     }
   }
 
-  private async getModels(): Promise<vscode.LanguageModelChatInformation[]> {
+  /** Manual discovery trigger — used by warmup, refresh commands, and the "Load Models" button. */
+  async warmupNow(): Promise<vscode.LanguageModelChatInformation[]> {
+    // AgentRouter requires an API key — never attempt discovery without one.
+    const apiKey = await this.authManager.getApiKey();
+    if (!apiKey) {
+      return this.modelCache.peekStale('models') ?? [];
+    }
     try {
       return await this.discoverAndCache();
     } catch {
@@ -235,19 +208,12 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
     }
   }
 
-  async warmupNow(): Promise<vscode.LanguageModelChatInformation[]> {
-    try {
-      return await this.discoverAndCache();
-    } catch {
-      return this.modelCache.peekStale('models') ?? [];
-    }
+  /** User-initiated model load — called from the "Load Models" tree item button. */
+  async loadModels(): Promise<void> {
+    await this.warmupNow();
   }
 
   override dispose(): void {
-    if (this.retryTimer) {
-      clearTimeout(this.retryTimer);
-      this.retryTimer = undefined;
-    }
     this.anthropicClientCache.clear();
     super.dispose();
   }
@@ -255,14 +221,15 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
   /** ── Language Model API surface ────────────────────────────────────────── */
 
   override async provideLanguageModelChatInformation(
-    options: vscode.PrepareLanguageModelChatModelOptions,
+    _options: vscode.PrepareLanguageModelChatModelOptions,
     token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelChatInformation[]> {
     if (token.isCancellationRequested) {
       return [];
     }
-    void options;
-    return this.getModels();
+    // Never trigger a network call here — VS Code calls this on every internal
+    // model-list refresh. Return the stale cache; the user loads models manually.
+    return this.modelCache.peekStale('models') ?? [];
   }
 
   override async provideLanguageModelChatResponse(
@@ -449,7 +416,7 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
             if (ttft === undefined) {
               ttft = Date.now() - startTime;
             }
-            reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
+            this.reportStructuredReasoningDelta(reasoning, structuredReasoningActive, progress);
             structuredReasoningActive = true;
             hasReportedAnyPart = true;
           }
@@ -460,7 +427,7 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
               ttft = Date.now() - startTime;
             }
             if (structuredReasoningActive) {
-              closeStructuredReasoning(progress);
+              this.closeStructuredReasoning(progress);
               structuredReasoningActive = false;
             }
             const result = processThinkingContent(content, thinkingState);
@@ -475,14 +442,14 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
           this.collectAnthropicToolCalls(choice.delta.tool_calls, toolCallBuilders);
           if (choice.finish_reason === 'tool_calls') {
             if (structuredReasoningActive) {
-              closeStructuredReasoning(progress);
+              this.closeStructuredReasoning(progress);
               structuredReasoningActive = false;
             }
             this.reportAnthropicToolCalls(progress, toolCallBuilders);
             hasReportedAnyPart = true;
           } else if (choice.finish_reason === 'stop') {
             if (structuredReasoningActive) {
-              closeStructuredReasoning(progress);
+              this.closeStructuredReasoning(progress);
               structuredReasoningActive = false;
             }
           }
@@ -503,7 +470,7 @@ export class AgentrouterChatProvider extends BaseChatProvider implements Amplify
       thinkingState.buffer = '';
     }
     if (structuredReasoningActive) {
-      closeStructuredReasoning(progress);
+      this.closeStructuredReasoning(progress);
     }
     this.reportAnthropicToolCalls(progress, toolCallBuilders);
 
@@ -587,22 +554,11 @@ function isReasoningEnabled(
   options: vscode.ProvideLanguageModelChatResponseOptions,
 ): boolean {
   void _modelId;
-  // Honor the same global toggle the rest of the providers respect.
-  let globalEnabled = true;
-  try {
-    globalEnabled = Boolean(
-      vscode.workspace.getConfiguration('copilot-amplify').get<boolean>('enableReasoning', true),
-    );
-  } catch {
-    // settings read can throw outside a workspace; default to enabled.
-  }
-  if (!globalEnabled) {
+  if (!getGlobalConfig().enableReasoning) {
     return false;
   }
   const reasoningEffort = (options as { modelConfiguration?: { reasoningEffort?: unknown }; modelOptions?: { reasoningEffort?: unknown } }).modelConfiguration?.reasoningEffort
     ?? options.modelOptions?.reasoningEffort;
-  // 'none' explicitly disables; any other value (including undefined, which
-  // falls through to the schema default) keeps thinking enabled.
   return reasoningEffort !== 'none';
 }
 
@@ -627,64 +583,3 @@ function maybeWarmup(provider: AgentrouterChatProvider): void {
 
 // ────────────────────────────────────────────────────────────────────────────
 // Reasoning-rendering helpers
-// ────────────────────────────────────────────────────────────────────────────
-// Mirrors the private methods on BaseChatProvider. Kept as standalone
-// functions so the Anthropic transport path (which has its own stream loop)
-// can render reasoning deltas the same way the OpenAI path does, without
-// changing the visibility of the base class's helpers.
-
-interface AnthropicThinkingPartCtor {
-  new (
-    value: string | string[],
-    id?: string,
-    metadata?: { readonly [key: string]: unknown },
-  ): vscode.LanguageModelResponsePart;
-}
-
-interface VscodeWithThinkingPart {
-  LanguageModelThinkingPart?: AnthropicThinkingPartCtor;
-}
-
-const ANTHROPIC_STRUCTURED_THINKING_OPEN = '<details><summary>Thinking</summary>\n\n';
-const ANTHROPIC_STRUCTURED_THINKING_CLOSE = '\n\n</details>\n\n';
-
-function getAnthropicThinkingPartCtor(): AnthropicThinkingPartCtor | undefined {
-  return (vscode as typeof vscode & VscodeWithThinkingPart).LanguageModelThinkingPart;
-}
-
-function escapeAnthropicMarkdownHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-}
-
-function reportStructuredReasoningDelta(
-  reasoning: string,
-  isActive: boolean,
-  progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-): void {
-  if (!reasoning) {
-    return;
-  }
-  const ThinkingPart = getAnthropicThinkingPartCtor();
-  if (ThinkingPart) {
-    progress.report(new ThinkingPart(reasoning));
-    return;
-  }
-  if (!isActive) {
-    progress.report(new vscode.LanguageModelTextPart(ANTHROPIC_STRUCTURED_THINKING_OPEN));
-  }
-  progress.report(new vscode.LanguageModelTextPart(escapeAnthropicMarkdownHtml(reasoning)));
-}
-
-function closeStructuredReasoning(
-  progress: vscode.Progress<vscode.LanguageModelResponsePart>,
-): void {
-  const ThinkingPart = getAnthropicThinkingPartCtor();
-  if (ThinkingPart) {
-    progress.report(new ThinkingPart('', '', { vscode_reasoning_done: true }));
-    return;
-  }
-  progress.report(new vscode.LanguageModelTextPart(ANTHROPIC_STRUCTURED_THINKING_CLOSE));
-}

@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { createProviderRegistry } from './providers';
 import { logger, disposeLogChannel } from './core/logging/logger';
 import { disposeOmnirouteConfig } from './providers/omniroute/config';
+import { disposeAgentrouterConfig } from './providers/agentrouter/config';
+import { disposeGlobalConfig } from './core/globalConfig';
 import { migratePlaintextApiKeys } from './secretsMigration';
 import { ProvidersTreeDataProvider } from './ui/treeProvider';
 import { registerProviderCommands } from './commands/providerCommands';
@@ -74,5 +76,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
   disposeOmnirouteConfig();
+  disposeAgentrouterConfig();
+  disposeGlobalConfig();
   disposeLogChannel();
 }

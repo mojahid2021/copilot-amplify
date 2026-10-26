@@ -38,6 +38,8 @@ export interface ProviderHealth {
     | 'connected'
     | 'not-configured'
     | 'error'
+    /** Required one-time setup (e.g. server URL) not yet done by the user. */
+    | 'setup-required'
     /** Last request hit a rate limit (HTTP 429 / quota signal). */
     | 'rate-limited'
     /** Last request failed authentication (HTTP 401/403). */

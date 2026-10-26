@@ -12,6 +12,7 @@ import { CircuitBreaker, type CircuitState } from '../resilience/circuitBreaker'
 import { AVAILABILITY_HINTS, classifyAvailability } from '../resilience/saturation';
 import { AuthenticationError, isCancellation } from '../errors';
 import { logger } from '../logging/logger';
+import { getGlobalConfig } from '../globalConfig';
 
 interface ToolCallBuilder {
   id: string;
@@ -192,7 +193,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
       return undefined;
     }
 
-    const isGlobalReasoningEnabled = vscode.workspace.getConfiguration('copilot-amplify').get<boolean>('enableReasoning', true);
+    const isGlobalReasoningEnabled = getGlobalConfig().enableReasoning;
 
     const reasoningEffort = getModelOption(options, 'reasoningEffort');
     if (!isGlobalReasoningEnabled || reasoningEffort === 'none') {
@@ -215,9 +216,9 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
       return undefined;
     }
 
-    const isGlobalReasoningEnabled = vscode.workspace.getConfiguration('copilot-amplify').get<boolean>('enableReasoning', true);
+    const isGlobalReasoningEnabled = getGlobalConfig().enableReasoning;
     if (!isGlobalReasoningEnabled) {
-      return undefined; // Usually undefined means default, but the provider might interpret setting no reasoning effort when thinking is disabled
+      return undefined;
     }
 
     return this.toReasoningEffort(getModelOption(options, 'reasoningEffort'));
@@ -562,7 +563,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     }
   }
 
-  private reportStructuredReasoningDelta(
+  protected reportStructuredReasoningDelta(
     reasoning: string,
     isActive: boolean,
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
@@ -584,7 +585,7 @@ export abstract class BaseChatProvider implements vscode.LanguageModelChatProvid
     progress.report(new vscode.LanguageModelTextPart(escapeMarkdownHtml(reasoning)));
   }
 
-  private closeStructuredReasoning(
+  protected closeStructuredReasoning(
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
   ): void {
     const ThinkingPart = getThinkingPartCtor();

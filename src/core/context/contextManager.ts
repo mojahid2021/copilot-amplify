@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { GenericContentPart, GenericMessage } from '../api/client';
 import { convertMessages } from './converter';
+import { getGlobalConfig } from '../globalConfig';
 
 export interface ContextWindowConfig {
   maxInputTokens: number;
@@ -44,7 +45,7 @@ export function prepareContextMessages(
   // 1. Inject Custom System Prompt if configured
   const systemPrompt =
     config.customSystemPrompt?.trim() ||
-    vscode.workspace.getConfiguration('copilot-amplify').get<string>('customSystemPrompt')?.trim() ||
+    getGlobalConfig().customSystemPrompt ||
     '';
 
   if (systemPrompt) {
@@ -117,13 +118,16 @@ export function prepareContextMessages(
     const target = nonSystemMsgs[0];
     if (!target) break;
 
+    const prevTokens = estimateMessageTokens(target);
     const excess = totalTokens - budget;
+    let shifted = false;
     if (typeof target.content === 'string') {
       const charBudget = Math.max(0, target.content.length - Math.ceil(excess * 3.8));
       if (charBudget > 0) {
         target.content = target.content.slice(target.content.length - charBudget);
       } else {
         nonSystemMsgs.shift();
+        shifted = true;
       }
     } else if (Array.isArray(target.content)) {
       // Drop text parts from oldest to newest until we fit.
@@ -137,10 +141,13 @@ export function prepareContextMessages(
           dropped = true;
         }
       }
-      if (!dropped) nonSystemMsgs.shift();
+      if (!dropped) { nonSystemMsgs.shift(); shifted = true; }
     }
 
-    totalTokens = nonSystemMsgs.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
+    // Update incrementally — only re-estimate the one mutated message, not the whole array.
+    totalTokens = shifted
+      ? totalTokens - prevTokens
+      : totalTokens - prevTokens + estimateMessageTokens(target);
     if (totalTokens <= budget) break;
   }
 

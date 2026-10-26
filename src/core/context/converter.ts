@@ -146,7 +146,8 @@ function appendTextContent(parts: GenericContentPart[], text: string): GenericCo
     return parts;
   }
 
-  return [...parts, { type: 'text', text }];
+  parts.push({ type: 'text', text });
+  return parts;
 }
 
 function appendDataContent(
@@ -155,15 +156,13 @@ function appendDataContent(
   allowImageParts: boolean,
 ): GenericContentPart[] {
   if (allowImageParts && part.mimeType.startsWith('image/')) {
-    return [
-      ...parts,
-      {
-        type: 'image_url',
-        image_url: {
-          url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString('base64')}`,
-        },
+    parts.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${part.mimeType};base64,${Buffer.from(part.data).toString('base64')}`,
       },
-    ];
+    });
+    return parts;
   }
 
   return appendTextContent(parts, dataPartToText(part));

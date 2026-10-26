@@ -1,5 +1,85 @@
 # Changelog
 
+## [2.3.0] - 2026-10-26
+
+Performance, UI, and reliability release. Eliminates excess CPU and IPC overhead, restructures the sidebar tree, adds user-initiated model discovery, and requires an explicit server URL for OmniRoute. No breaking changes to commands or settings.
+
+### Added
+
+- **`src/core/globalConfig.ts`** — cached module for global settings (`enableReasoning`, `customSystemPrompt`). Reads `vscode.workspace.getConfiguration` once and invalidates with a 250 ms debounce on `onDidChangeConfiguration`. Replaces 4 separate per-request IPC reads scattered across `baseChatProvider.ts`, `agentrouter/provider.ts`, and `contextManager.ts`. Disposed via new `disposeGlobalConfig()` call in `deactivate()`.
+
+- **`src/core/util/cachedConfig.ts`** — `createCachedConfig<T>(section, build)` factory. Internalises the debounce/listener/invalidation boilerplate that was copy-pasted across every config module. Returns `{ get(), onChange, dispose() }`. Used by `globalConfig.ts`, `omniroute/config.ts`, and `agentrouter/config.ts`.
+
+- **`copilot-amplify.loadModels` command** — new command registered in `providerCommands.ts` and declared in `package.json`. Calls `provider.loadModels()` on the target dynamic provider with a progress notification. Shown as a `$(cloud-download)` inline button on dynamic-provider tree items.
+
+- **`loadModels(): Promise<void>`** method on `OmnirouteChatProvider` and `AgentrouterChatProvider` — public entry point for user-initiated model discovery. Delegates to `warmupNow()`.
+
+- **`isOmnirouteBaseUrlConfigured()` export** in `omniroute/config.ts` — returns `true` only when the user has explicitly typed a server URL into settings. Drives the new URL-required guards in commands and `warmupNow()`.
+
+- **`baseUrlConfigured: boolean` field** added to `OmnirouteConfig` — derived from the raw setting value before it is normalized to the hardcoded default. Lets callers distinguish "user explicitly configured a URL" from "using the fallback default".
+
+- **`'setup-required'` status** added to `ProviderHealth.status` union — signals that a required one-time setup step (e.g. server URL) has not been done yet, distinct from `'not-configured'` (key not set) and `'error'` (call failed).
+
+- **`omniroute-provider` `contextValue`** — OmniRoute's tree item now uses this distinct value (instead of sharing `'dynamic-provider'` with AgentRouter), enabling a dedicated set of inline buttons for OmniRoute.
+
+- **"Edit Base URL" inline button on the OmniRoute row** (`$(link)`, `inline@2`). Clicking it opens the Edit Base URL prompt directly from the sidebar — same as the existing OmniRoute-specific command. Appears alongside Load Models, Set API Key, Test Connection, and Clear API Key.
+
+### Changed
+
+- **Manual-only model discovery (OmniRoute + AgentRouter).** `provideLanguageModelChatInformation` on both dynamic providers now returns the stale cache unconditionally — it never triggers `discoverAndCache()`. VS Code calls this method on every internal model-list refresh; previously each call could start a real HTTP fetch when the TTL expired. Background retry timers (`scheduleDiscoveryRetry`, `retryTimer`, `retryDelayMs`, `discoveryAttempts`, `MAX_DISCOVERY_ATTEMPTS`) are deleted from both providers. Discovery now runs only when the user explicitly presses Load Models, Refresh, or has `warmupOnStartup: true`.
+
+- **API key / server URL gate in `warmupNow()`** — `AgentrouterChatProvider.warmupNow()` returns the stale cache immediately if no API key is set. `OmnirouteChatProvider.warmupNow()` returns immediately if no server URL has been explicitly configured. This prevents all network calls — from Load Models, Refresh, and `warmupOnStartup` — when the prerequisite setup has not been done.
+
+- **`copilot-amplify.loadModels` command prerequisite check** — before calling `provider.loadModels()` the command now verifies the prerequisite is met. For OmniRoute: if no server URL is configured it shows an "OmniRoute server URL is not configured" info message with a "Set Server URL" button. For all other providers: if no API key is set it shows a "requires an API key" info message with a "Set API Key" button.
+
+- **`copilot-amplify.provider.click` (row click) updated for OmniRoute** — if the server URL is not configured, clicking the OmniRoute row opens the Edit Base URL prompt instead of running a connection test.
+
+- **`runTestConnection` updated for OmniRoute** — checks for a configured server URL before attempting a connection test; shows "Set Server URL" prompt if missing.
+
+- **OmniRoute `health()` returns `status: 'setup-required'`** when no server URL is configured (detail: `'Set server URL to load models'`). The sidebar status label shows `'⚠ No server URL'`.
+
+- **Sidebar tree restructured — PROVIDERS + MODELS merged.** The separate MODELS section is removed. Each provider row in PROVIDERS is now collapsible: expanding it reveals its model list inline. The MODELS section and `ModelGroupTreeItem` interface are deleted.
+
+- **OmniRoute-specific actions moved under the OmniRoute provider row.** "Show OmniRoute Diagnostics" and "Show Telemetry Logs" are now child rows inside the OmniRoute provider row (expanded), not items in the global ACTIONS section. "Edit Server URL" is now an inline button on the row header.
+
+- **No-op `fireModelInformationChanged` suppression (OmniRoute + AgentRouter).** Both dynamic providers now track `lastKnownModelIds: ReadonlySet<string>`. After a successful discovery run the event fires only when the model set actually changed.
+
+- **Tree sidebar API key reads eliminated per render.** `ProvidersTreeDataProvider` adds an `apiKeyCache: Map<string, boolean>` populated on the first `getProviderItems()` call (one `Promise.all` over all 6 providers). Subsequent renders are synchronous. Key changes are pushed via `onDidChangeApiKey` subscriptions.
+
+- **OmniRoute badge suppressed when anonymous access is OK** — the `⚠` badge no longer appears on the OmniRoute row when no API key is set; the key is optional for OmniRoute (anonymous access). The badge still appears on all other providers when no key is configured.
+
+- **Empty-state hint in expanded provider row** is context-aware: `'Set server URL first — click the row to configure'` (OmniRoute URL not set), `'Set an API key first, then click ↓ Load Models'` (key required but missing), or `'No models loaded — click ↓ Load Models'` (ready, not yet loaded). Static providers show `'No models available'`.
+
+- **`omniroute/config.ts` and `agentrouter/config.ts` refactored** to use `createCachedConfig`. All public exports unchanged — callers need no updates.
+
+- **`agentrouter/config.ts` resource leak fixed.** `disposeAgentrouterConfig()` was defined but never called; it is now called from `deactivate()`.
+
+- **`copilot-amplify.refresh` command** now also calls `loadModels()` on AgentRouter (previously it only warmed up OmniRoute).
+
+- **`converter.ts` `appendTextContent` / `appendDataContent`** replace `[...parts, item]` spread with `parts.push(item); return parts` — eliminates a new-array allocation on every content part of every message.
+
+- **`contextManager.ts` inner trim loop** now updates `totalTokens` incrementally (O(n)) instead of running `reduce()` from scratch after each mutation (O(n²) over long contexts).
+
+- **`baseChatProvider.ts`, `agentrouter/provider.ts`, `contextManager.ts` config reads** — per-request `vscode.workspace.getConfiguration()` calls for `enableReasoning` and `customSystemPrompt` replaced with `getGlobalConfig()`.
+
+### Removed
+
+- **Separate MODELS tree section and `ModelGroupTreeItem` interface** — eliminated in the sidebar restructure; models now live directly under each provider row.
+
+- **OmniRoute-specific items from the global ACTIONS section** — "Edit OmniRoute Base URL" (now an inline button), "Show OmniRoute Diagnostics", and "Show OmniRoute Telemetry Logs" removed from ACTIONS; the latter two are now child rows under the OmniRoute provider.
+
+- **Duplicate reasoning streaming helpers from `agentrouter/provider.ts`** (−63 lines) — `reportStructuredReasoningDelta`, `closeStructuredReasoning`, `getAnthropicThinkingPartCtor`, `escapeAnthropicMarkdownHtml` and related interfaces/constants deleted. `AgentrouterChatProvider` now calls the `protected` base-class helpers via `this.`.
+
+- **Background retry machinery from both dynamic providers** — `scheduleDiscoveryRetry()`, `retryTimer`, `retryDelayMs`, `MAX_DISCOVERY_ATTEMPTS`, `discoveryAttempts` and related dispose cleanup deleted from both providers.
+
+- **`getModels()` private method** removed from both dynamic providers.
+
+### Notes
+
+- `warmupOnStartup` setting still works as the one permitted automatic fetch path (opt-in, default `false`). It now also respects the API key / server URL gate — no network call fires if the prerequisite is unmet.
+- OmniRoute anonymous access (no API key) is still supported; only the server URL is required.
+- The `@ts-ignore` comment on `TreeItemBadge` in `treeProvider.ts` is a pre-existing issue unrelated to this release.
+
 ## [2.2.0] - 2026-09-03
 
 New first-class provider: **CA-AgentRouter** (`https://agentrouter.org`). Surfaces the AgentRouter gateway through Copilot Amplify with a single API key and a per-model transport — Claude Opus 4-x models go through the native Anthropic `messages` API; GPT, GLM, DeepSeek and other models go through the OpenAI-compatible chat-completions endpoint. The catalog is discovered dynamically from `GET {baseUrl}/api/pricing` and the picker is grouped under a single "CA-AgentRouter" vendor. **All six providers' externally-visible identifiers (vendor, display name, settings section, secret key) are now prefixed with `CA-` to avoid collisions with other extensions on a user's machine** — this affects every provider, not just the new one.
