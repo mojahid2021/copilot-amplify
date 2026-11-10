@@ -13,16 +13,13 @@
 
 import * as vscode from 'vscode';
 import { normalizeBaseUrl } from '../../core/url';
-import { createCachedConfig } from '../../core/util/cachedConfig';
+import { createCachedConfig, positiveNumber } from '../../core/util/cachedConfig';
 import { AGENTROUTER_SETTINGS_SECTION } from './descriptor';
 
 const SECTION = AGENTROUTER_SETTINGS_SECTION;
 const DEFAULT_BASE_URL = 'https://agentrouter.org/v1';
-const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 8_000;
-
-export { DEFAULT_BASE_URL };
 
 export interface AgentrouterConfig {
   /** OpenAI-compatible base URL (must include `/v1`). */
@@ -35,17 +32,10 @@ export interface AgentrouterConfig {
   discoveryTimeoutMs: number;
 }
 
-function positiveNumber(value: number | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
 const _cache = createCachedConfig(SECTION, (cfg: vscode.WorkspaceConfiguration): AgentrouterConfig => {
-  const cacheTtlSeconds = cfg.get<number>('cacheTtlSeconds', 300);
   return {
     baseUrl: normalizeBaseUrl(cfg.get<string>('baseUrl'), DEFAULT_BASE_URL),
-    cacheTtlMs: positiveNumber(cacheTtlSeconds, DEFAULT_CACHE_TTL_MS / 1000) > 0
-      ? Math.max(10, cacheTtlSeconds) * 1000
-      : DEFAULT_CACHE_TTL_MS,
+    cacheTtlMs: Math.max(10, cfg.get<number>('cacheTtlSeconds', 300)) * 1000,
     requestTimeoutMs: positiveNumber(cfg.get<number>('requestTimeoutMs'), DEFAULT_REQUEST_TIMEOUT_MS),
     discoveryTimeoutMs: positiveNumber(cfg.get<number>('discoveryTimeoutMs'), DEFAULT_DISCOVERY_TIMEOUT_MS),
   };
@@ -69,11 +59,6 @@ export function getAgentrouterOpenaiBaseUrl(): string {
  */
 export function getAgentrouterAnthropicBaseUrl(): string {
   return _cache.get().baseUrl.replace(/\/v1\/?$/, '');
-}
-
-/** Discovery / connection-test base URL — same as the OpenAI-compat one. */
-export function getAgentrouterDiscoveryBaseUrl(): string {
-  return _cache.get().baseUrl;
 }
 
 /** Detach the configuration listener — call once on extension deactivation. */

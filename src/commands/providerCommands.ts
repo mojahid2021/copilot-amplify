@@ -1,319 +1,290 @@
 import * as vscode from 'vscode';
-import type { ProviderRegistry } from '../core/provider/registry';
+import type { ProviderId, ProviderRegistry } from '../core/provider/registry';
 import { buildAmplifyDiagnostics, showTextReport } from '../core/diagnostics';
 import type { ProvidersTreeDataProvider, ProviderTreeItem, ModelTreeItem } from '../ui/treeProvider';
 import { isOmnirouteBaseUrlConfigured } from '../providers/omniroute/config';
+import { qualityIcon } from '../ui/networkQuality';
+import { connectionSummary, isAuthFailure } from '../ui/notifications';
 
-/**
- * General provider commands (all providers, preserved from 1.x):
- * manage / refresh / provider.click / setApiKey / testConnection /
- * clearApiKey / pinModel / unpinModel / selectModel / documentation / report.
- */
+/** Commands that work for every provider (API keys, testing, model selection, reports). */
 
 export interface ProviderCommandDeps {
   registry: ProviderRegistry;
   tree: ProvidersTreeDataProvider;
   statusBarItem: vscode.StatusBarItem;
+  updateNetQualityBar: () => void;
 }
 
-function toQuickPickEntries(registry: ProviderRegistry): Array<{ label: string; id: string }> {
-  return registry.list().map((d) => ({ label: d.displayName, id: d.id }));
-}
+type ProviderAction = 'setApiKey' | 'test' | 'clearApiKey';
+type MenuEntry = vscode.QuickPickItem & { command?: string; providerAction?: ProviderAction };
+
+const separator = (label: string): MenuEntry => ({ label, kind: vscode.QuickPickItemKind.Separator });
+
+/** The "Manage Providers" menu: either run a command, or pick a provider first. */
+const MANAGE_MENU: MenuEntry[] = [
+  separator('Providers'),
+  { label: '$(key) Set API Key…', detail: 'Add or replace the key for a provider', providerAction: 'setApiKey' },
+  { label: '$(plug) Test Connection', detail: 'Check that a provider is reachable and the key works', providerAction: 'test' },
+  { label: '$(trash) Remove API Key', detail: 'Delete a saved key from your keychain', providerAction: 'clearApiKey' },
+  { label: '$(refresh) Refresh Providers and Models', detail: 'Reload model lists from OmniRoute and AgentRouter', command: 'copilot-amplify.refresh' },
+  separator('OmniRoute'),
+  { label: '$(settings-gear) Set Up OmniRoute…', detail: 'Server URL, API key and a connection test', command: 'copilot-amplify.CA-omniroute.configure' },
+  { label: '$(link) Change Server URL…', command: 'copilot-amplify.CA-omniroute.editBaseUrl' },
+  { label: '$(output) Show Request Log', command: 'copilot-amplify.CA-omniroute.showTelemetry' },
+  separator('Troubleshooting'),
+  { label: '$(pulse) Show Diagnostics', detail: 'Status, keys and errors for every provider', command: 'copilot-amplify.showDiagnostics' },
+  { label: '$(dashboard) Show Network Quality', detail: 'Response time and error rate per provider', command: 'copilot-amplify.showNetworkQuality' },
+];
+
+const ACTION_VERBS: Record<ProviderAction, string> = {
+  setApiKey: 'set an API key for',
+  test: 'test',
+  clearApiKey: 'remove the API key from',
+};
 
 export function registerProviderCommands(context: vscode.ExtensionContext, deps: ProviderCommandDeps): void {
-  const { registry, tree, statusBarItem } = deps;
+  const { registry, tree, statusBarItem, updateNetQualityBar } = deps;
 
-  const authOf = (id?: string) => (id && registry.has(id) ? registry.auth(id as never) : undefined);
+  const displayName = (id: ProviderId) => registry.get(id)?.displayName ?? id;
+
+  /** The provider id from a tree item, or ask the user to pick one. */
+  async function resolveProviderId(item?: { providerId?: string }, placeHolder?: string): Promise<ProviderId | undefined> {
+    const id = item?.providerId ?? (await pickProviderId(registry, placeHolder));
+    return id && registry.has(id) ? id : undefined;
+  }
+
+  /**
+   * True when the provider can be used right now. Otherwise offers to fix
+   * the missing setup: the server URL for OmniRoute, an API key for the rest.
+   */
+  async function ensureReady(id: ProviderId): Promise<boolean> {
+    if (id === 'omniroute') {
+      if (isOmnirouteBaseUrlConfigured()) {
+        return true;
+      }
+      const choice = await vscode.window.showInformationMessage('Set your OmniRoute server URL first.', 'Set Server URL');
+      if (choice) {
+        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
+        tree.refresh();
+      }
+      return false;
+    }
+
+    const auth = registry.auth(id);
+    if (await auth.getApiKey()) {
+      return true;
+    }
+    const choice = await vscode.window.showInformationMessage(`Add your ${displayName(id)} API key first.`, 'Set API Key');
+    if (choice) {
+      await auth.promptForApiKey();
+      tree.refresh();
+    }
+    return false;
+  }
+
+  async function testConnection(id: ProviderId): Promise<void> {
+    if (!(await ensureReady(id))) {
+      return;
+    }
+    const name = displayName(id);
+    try {
+      const result = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Testing ${name}…` },
+        () => registry.provider(id).testConnection(),
+      );
+      tree.refresh();
+      if (result.ok) {
+        void vscode.window.showInformationMessage(connectionSummary(name, result));
+        return;
+      }
+      if (isAuthFailure(result)) {
+        if (await vscode.window.showErrorMessage(connectionSummary(name, result), 'Update API Key')) {
+          await setApiKey({ providerId: id });
+        }
+        return;
+      }
+      void vscode.window.showErrorMessage(connectionSummary(name, result));
+    } catch (error) {
+      void vscode.window.showErrorMessage(`Couldn't test ${name}. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function setApiKey(item?: { providerId?: string }): Promise<void> {
+    const id = await resolveProviderId(item, 'Choose a provider to set an API key for');
+    if (id) {
+      await registry.auth(id).promptForApiKey();
+      tree.refresh();
+    }
+  }
+
+  async function clearApiKey(item?: { providerId?: string }): Promise<void> {
+    const id = await resolveProviderId(item, 'Choose a provider to remove the API key from');
+    if (!id) {
+      return;
+    }
+    const name = displayName(id);
+    const confirm = await vscode.window.showWarningMessage(
+      `Remove the saved ${name} API key?`,
+      { modal: true, detail: `${name} models stop working until you add a key again.` },
+      'Remove',
+    );
+    if (confirm !== 'Remove') {
+      return;
+    }
+    await registry.auth(id).deleteApiKey();
+    registry.provider(id).refreshCaches();
+    tree.refresh();
+    void vscode.window.showInformationMessage(`${name} API key removed.`);
+  }
 
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot-amplify.manage', async () => {
-      const selectedAction = await vscode.window.showQuickPick(
-        [
-          { label: '$(key) Set API Key', action: 'setApiKey', description: 'Configure credentials for a provider' },
-          { label: '$(plug) Test Connection', action: 'test', description: 'Verify provider connection & model availability' },
-          { label: '$(trash) Clear API Key', action: 'clearApiKey', description: 'Remove saved credentials' },
-          { label: '$(sync) Refresh Providers & Models', action: 'refresh', description: 'Refetch live models and update state' },
-          { label: '$(pulse) Show Diagnostics', action: 'diagnostics', description: 'All providers: status, keys, circuits' },
-          { label: '$(gear) Configure OmniRoute…', action: 'omniroute-configure', description: 'Base URL, API key and options' },
-          { label: '$(link) Edit OmniRoute Base URL', action: 'omniroute-baseurl', description: 'Change the OmniRoute server URL' },
-          { label: '$(pulse) Show OmniRoute Diagnostics', action: 'omniroute-diagnostics', description: 'Connection, cache and health report' },
-          { label: '$(output) Show OmniRoute Telemetry Logs', action: 'telemetry', description: 'Open OmniRoute response logs' },
-        ],
-        { placeHolder: 'Manage Copilot Amplify Providers' },
-      );
-
-      if (!selectedAction) {
-        return;
-      }
-
-      if (selectedAction.action === 'refresh') {
-        await vscode.commands.executeCommand('copilot-amplify.refresh');
-        return;
-      }
-      if (selectedAction.action === 'diagnostics') {
-        await vscode.commands.executeCommand('copilot-amplify.showDiagnostics');
-        return;
-      }
-      if (selectedAction.action === 'telemetry') {
-        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.showTelemetry');
-        return;
-      }
-      if (selectedAction.action === 'omniroute-configure') {
-        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.configure');
-        return;
-      }
-      if (selectedAction.action === 'omniroute-baseurl') {
-        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
-        return;
-      }
-      if (selectedAction.action === 'omniroute-diagnostics') {
-        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.showDiagnostics');
-        return;
-      }
-
-      const selectedProvider = await vscode.window.showQuickPick(toQuickPickEntries(registry), {
-        placeHolder: `Select provider to ${selectedAction.label.toLowerCase()}`,
+      const choice = await vscode.window.showQuickPick(MANAGE_MENU, {
+        title: 'Copilot Amplify',
+        placeHolder: 'What would you like to do?',
       });
-      if (!selectedProvider) {
+      if (choice?.command) {
+        await vscode.commands.executeCommand(choice.command);
         return;
       }
-
-      const id = selectedProvider.id;
-      const auth = authOf(id);
-      if (!auth || !registry.has(id)) {
+      if (!choice?.providerAction) {
         return;
       }
-      const displayName = registry.get(id as never)?.displayName ?? id;
-
-      if (selectedAction.action === 'setApiKey') {
-        await vscode.commands.executeCommand('copilot-amplify.setApiKey', { providerId: id } satisfies Partial<ProviderTreeItem>);
-      } else if (selectedAction.action === 'test') {
-        await runTestConnection(registry, tree, id, displayName);
-      } else if (selectedAction.action === 'clearApiKey') {
-        await vscode.commands.executeCommand('copilot-amplify.clearApiKey', { providerId: id } satisfies Partial<ProviderTreeItem>);
+      const id = await resolveProviderId(undefined, `Choose a provider to ${ACTION_VERBS[choice.providerAction]}`);
+      if (!id) {
+        return;
       }
+      const actions: Record<ProviderAction, () => Promise<void>> = {
+        setApiKey: () => setApiKey({ providerId: id }),
+        test: () => testConnection(id),
+        clearApiKey: () => clearApiKey({ providerId: id }),
+      };
+      await actions[choice.providerAction]();
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.refresh', async () => {
+    vscode.commands.registerCommand('copilot-amplify.refresh', () => {
       for (const descriptor of registry.list()) {
-        try {
-          registry.provider(descriptor.id).refreshCaches();
-        } catch {
-          /* lazy instantiation failures are non-fatal here */
-        }
-      }
-      // Re-discover dynamic provider models eagerly on explicit refresh.
-      for (const id of ['omniroute', 'agentrouter'] as const) {
-        try {
-          void (registry.provider(id) as unknown as { loadModels?(): Promise<unknown> }).loadModels?.().catch(() => {});
-        } catch {
-          /* discovery errors surface via health */
-        }
+        const provider = registry.provider(descriptor.id);
+        provider.refreshCaches();
+        // Dynamic catalogs refetch right away on an explicit refresh; failures show up in health().
+        void provider.loadModels?.().then(() => tree.refresh());
       }
       tree.refresh();
     }),
 
     vscode.commands.registerCommand('copilot-amplify.loadModels', async (item?: ProviderTreeItem) => {
       const id = item?.providerId;
-      if (!id || !registry.has(id)) { return; }
-
-      // OmniRoute requires a user-configured server URL; all others require a key.
-      if (id === 'omniroute') {
-        if (!isOmnirouteBaseUrlConfigured()) {
-          const choice = await vscode.window.showInformationMessage(
-            'OmniRoute server URL is not configured.',
-            'Set Server URL',
-          );
-          if (choice === 'Set Server URL') {
-            await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
-            tree.refresh();
-          }
-          return;
-        }
-      } else {
-        const auth = registry.auth(id as never);
-        const key = await auth.getApiKey();
-        if (!key) {
-          const choice = await vscode.window.showInformationMessage(
-            `${registry.get(id as never)?.displayName ?? id} requires an API key to load models.`,
-            'Set API Key',
-          );
-          if (choice === 'Set API Key') {
-            await auth.promptForApiKey();
-            tree.refresh();
-          }
-          return;
-        }
+      if (!id || !registry.has(id)) {
+        return;
       }
-
-      const provider = registry.provider(id as never) as unknown as { loadModels?(): Promise<void> };
-      if (!provider.loadModels) { return; }
-      const displayName = registry.get(id as never)?.displayName ?? id;
-      await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: `Loading ${displayName} models…`, cancellable: false },
-        () => provider.loadModels!().catch((err: unknown) => {
-          void vscode.window.showErrorMessage(
-            `Failed to load models: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }),
+      const provider = registry.provider(id);
+      if (!provider.loadModels || !(await ensureReady(id))) {
+        return;
+      }
+      const name = displayName(id);
+      const models = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Loading ${name} models…` },
+        () => provider.loadModels!(),
       );
       tree.refresh();
+      if (models.length === 0) {
+        const health = provider.health();
+        const reason = health.detail && health.status !== 'not-configured' ? ` ${health.detail}` : '';
+        void vscode.window.showWarningMessage(`No ${name} models were loaded.${reason}`);
+      }
     }),
 
     vscode.commands.registerCommand('copilot-amplify.showDiagnostics', async () => {
       const report = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: 'Copilot Amplify: building diagnostics…' },
+        { location: vscode.ProgressLocation.Notification, title: 'Collecting diagnostics…' },
         () => buildAmplifyDiagnostics(registry),
       );
       await showTextReport(report);
     }),
 
+    // Clicking a provider row: set it up if needed, otherwise test it.
     vscode.commands.registerCommand('copilot-amplify.provider.click', async (item: ProviderTreeItem) => {
       const id = item?.providerId;
-      if (!id || !registry.has(id)) { return; }
-      if (id === 'omniroute') {
-        if (!isOmnirouteBaseUrlConfigured()) {
-          await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
-          tree.refresh();
-        } else {
-          await runTestConnection(registry, tree, id, registry.get(id)?.displayName ?? id);
-        }
+      if (!id || !registry.has(id)) {
         return;
       }
-      const auth = registry.auth(id);
-      const key = await auth.getApiKey();
-      if (key) {
-        await runTestConnection(registry, tree, id, registry.get(id)?.displayName ?? id);
+      if (id === 'omniroute' && !isOmnirouteBaseUrlConfigured()) {
+        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
+      } else if (id !== 'omniroute' && !(await registry.auth(id).getApiKey())) {
+        await registry.auth(id).promptForApiKey();
       } else {
-        await auth.promptForApiKey();
-        tree.refresh();
+        await testConnection(id);
+        return;
       }
-    }),
-
-    vscode.commands.registerCommand('copilot-amplify.setApiKey', async (item?: ProviderTreeItem) => {
-      const id = item?.providerId;
-      const auth = id ? authOf(id) : await pickProviderThenAuth(registry);
-      if (!auth) { return; }
-      await auth.promptForApiKey();
       tree.refresh();
     }),
+
+    vscode.commands.registerCommand('copilot-amplify.setApiKey', setApiKey),
+    vscode.commands.registerCommand('copilot-amplify.clearApiKey', clearApiKey),
 
     vscode.commands.registerCommand('copilot-amplify.testConnection', async (item?: ProviderTreeItem) => {
-      const id = item?.providerId ?? (await pickProviderId(registry));
-      if (!id || !registry.has(id)) { return; }
-      await runTestConnection(registry, tree, id, registry.get(id)?.displayName ?? id);
-    }),
-
-    vscode.commands.registerCommand('copilot-amplify.clearApiKey', async (item?: ProviderTreeItem) => {
-      const id = item?.providerId;
-      const auth = id ? authOf(id) : await pickProviderThenAuth(registry);
-      if (!auth || !id || !registry.has(id)) { return; }
-      await auth.deleteApiKey();
-      try {
-        registry.provider(id).refreshCaches();
-      } catch { /* not yet instantiated */ }
-      tree.refresh();
-      vscode.window.showInformationMessage(`${registry.get(id)?.displayName ?? id} API key cleared`);
+      const id = await resolveProviderId(item, 'Choose a provider to test');
+      if (id) {
+        await testConnection(id);
+      }
     }),
 
     vscode.commands.registerCommand('copilot-amplify.pinModel', (item?: ModelTreeItem) => {
-      if (item && item.providerId && item.modelId) {
-        const name = typeof item.label === 'string' ? item.label : item.modelId;
-        tree.pinModel(item.providerId, item.modelId, name);
-        vscode.window.showInformationMessage(`Pinned ${name} to Favorites`);
+      if (item?.providerId && item.modelId) {
+        tree.pinModel(item.providerId, item.modelId, typeof item.label === 'string' ? item.label : item.modelId);
       }
     }),
 
     vscode.commands.registerCommand('copilot-amplify.unpinModel', (item?: ModelTreeItem) => {
-      if (item && item.providerId && item.modelId) {
+      if (item?.providerId && item.modelId) {
         tree.unpinModel(item.providerId, item.modelId);
       }
     }),
 
+    // Marks a model as the one you're using. VS Code has no API to switch
+    // Copilot Chat's model, so the message points the user at the picker.
     vscode.commands.registerCommand('copilot-amplify.selectModel', async (item?: ModelTreeItem) => {
-      if (item && item.providerId && item.modelId) {
-        tree.setActiveModel(item.providerId, item.modelId);
-        statusBarItem.text = `$(sparkle) Amplify: ${item.modelId}`;
-        vscode.window.showInformationMessage(`Selected model ${item.modelId}`);
+      if (!item?.providerId || !item.modelId) {
+        return;
+      }
+      const name = typeof item.label === 'string' ? item.label : item.modelId;
+      tree.setActiveModel(item.providerId, item.modelId, name);
+      statusBarItem.text = `$(sparkle) ${name}`;
+      const choice = await vscode.window.showInformationMessage(
+        `${name} selected. Choose it in Copilot Chat's model picker to start using it.`,
+        'Open Chat',
+      );
+      if (choice) {
+        await vscode.commands.executeCommand('workbench.action.chat.open');
       }
     }),
 
-    vscode.commands.registerCommand('copilot-amplify.documentation', () => {
-      void vscode.env.openExternal(vscode.Uri.parse('https://github.com/mojahid2021/copilot-amplify#readme'));
-    }),
-    vscode.commands.registerCommand('copilot-amplify.report', () => {
-      void vscode.env.openExternal(vscode.Uri.parse('https://github.com/mojahid2021/copilot-amplify/issues/new'));
+    vscode.commands.registerCommand('copilot-amplify.documentation', () =>
+      vscode.env.openExternal(vscode.Uri.parse('https://github.com/mojahid2021/copilot-amplify#readme')),
+    ),
+    vscode.commands.registerCommand('copilot-amplify.report', () =>
+      vscode.env.openExternal(vscode.Uri.parse('https://github.com/mojahid2021/copilot-amplify/issues/new')),
+    ),
+
+    vscode.commands.registerCommand('copilot-amplify.showNetworkQuality', async () => {
+      const items: vscode.QuickPickItem[] = registry.list().map((descriptor) => {
+        const q = registry.provider(descriptor.id).getNetworkQuality();
+        if (q.sampleCount === 0) {
+          return { label: `$(circle-outline) ${descriptor.displayName}`, description: 'No requests yet' };
+        }
+        return {
+          label: `${qualityIcon(q.level)} ${descriptor.displayName}`,
+          description: `${q.avgLatencyMs} ms to first token · ${Math.round(q.errorRate * 100)}% errors`,
+          detail: `Based on the last ${q.sampleCount} request${q.sampleCount === 1 ? '' : 's'}`,
+        };
+      });
+      await vscode.window.showQuickPick(items, { title: 'Network Quality', placeHolder: 'Response time and errors per provider' });
+      updateNetQualityBar();
     }),
   );
 }
 
-async function pickProviderId(registry: ProviderRegistry): Promise<string | undefined> {
-  const choice = await vscode.window.showQuickPick(toQuickPickEntries(registry), {
-    placeHolder: 'Select a provider',
-  });
-  return choice?.id;
-}
-
-async function pickProviderThenAuth(registry: ProviderRegistry) {
-  const id = await pickProviderId(registry);
-  return id ? registry.auth(id as never) : undefined;
-}
-
-async function runTestConnection(
-  registry: ProviderRegistry,
-  tree: ProvidersTreeDataProvider,
-  id: string,
-  displayName: string,
-): Promise<void> {
-  if (!registry.has(id)) { return; }
-  let provider;
-  try {
-    provider = registry.provider(id as never);
-  } catch {
-    return;
-  }
-  if (id === 'omniroute') {
-    if (!isOmnirouteBaseUrlConfigured()) {
-      const choice = await vscode.window.showInformationMessage(
-        'OmniRoute server URL is not configured.',
-        'Set Server URL',
-      );
-      if (choice === 'Set Server URL') {
-        await vscode.commands.executeCommand('copilot-amplify.CA-omniroute.editBaseUrl');
-        tree.refresh();
-      }
-      return;
-    }
-  } else {
-    const auth = registry.auth(id as never);
-    if (!(await auth.getApiKey())) {
-      const choice = await vscode.window.showInformationMessage(
-        `${displayName} API key is not set. Would you like to set it now?`,
-        'Set API Key',
-      );
-      if (choice === 'Set API Key') {
-        await auth.promptForApiKey();
-        tree.refresh();
-      }
-      return;
-    }
-  }
-
-  try {
-    const result = await provider.testConnection();
-    if (result.ok) {
-      const extras =
-        result.latencyMs !== undefined ? ` · ${result.latencyMs} ms` : '';
-      const models = result.modelCount !== undefined ? ` · ${result.modelCount} models` : '';
-      void vscode.window.showInformationMessage(`✓ ${displayName}: ${result.message}${extras}${models}`);
-    } else {
-      const status = result.httpStatus !== undefined ? `\n\nHTTP status: ${result.httpStatus}` : '';
-      void vscode.window.showErrorMessage(
-        `✗ ${displayName} connection failed\n\nReason:\n${result.message}${status}`,
-      );
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    void vscode.window.showErrorMessage(`${displayName} test failed: ${msg}`);
-  }
+async function pickProviderId(registry: ProviderRegistry, placeHolder = 'Choose a provider'): Promise<string | undefined> {
+  const entries = registry.list().map((d) => ({ label: d.displayName, id: d.id }));
+  return (await vscode.window.showQuickPick(entries, { title: 'Copilot Amplify', placeHolder }))?.id;
 }

@@ -6,14 +6,14 @@
 
 **Extend GitHub Copilot Chat with the AI providers *you* choose.**
 
-CA-Xiaomi MiMo · CA-Z.ai GLM · CA-Groq · CA-NVIDIA NIM · CA-Omniroute · CA-AgentRouter — all first-class,
+Xiaomi MiMo · Z.ai GLM · Groq · NVIDIA NIM · OmniRoute · AgentRouter — all first-class,
 equal siblings inside the VS Code Language Model API.
 
 [![Version](https://img.shields.io/badge/version-2.3.0-blue)](CHANGELOG.md)
 [![VS Code Marketplace](https://img.shields.io/badge/VS_Code_Marketplace-installed-0098FF?logo=visualstudiocode&logoColor=white)](https://marketplace.visualstudio.com/items?itemName=mojahid2021.copilot-amplify)
 [![Open VSX](https://img.shields.io/badge/Open_VSX-2.3.0-8A2BE2)](https://open-vsx.org/extension/mojahid2021/copilot-amplify)
 [![Publish Extension](https://github.com/mojahid2021/copilot-amplify/actions/workflows/publish-openvsx.yml/badge.svg)](https://github.com/mojahid2021/copilot-amplify/actions/workflows/publish-openvsx.yml)
-[![Tests](https://img.shields.io/badge/tests-223%20passing-brightgreen)](#-development)
+[![Tests](https://img.shields.io/badge/tests-vitest-brightgreen)](#-development)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](#-development)
 [![License](https://img.shields.io/badge/license-ISC-yellow)](LICENSE)
 
@@ -30,15 +30,15 @@ Copilot Amplify opens it up:
 
 | | |
 |---|---|
-| 🔌 **Bring your own provider** | CA-Xiaomi MiMo, CA-Z.ai GLM, CA-Groq, CA-NVIDIA NIM, CA-Omniroute, and CA-AgentRouter work out of the box |
+| 🔌 **Bring your own provider** | Xiaomi MiMo, Z.ai GLM, Groq, NVIDIA NIM, OmniRoute, and AgentRouter work out of the box |
 | ⚖️ **No privileged provider** | Every provider is an equal sibling — no hidden routing, no forced hierarchy |
 | 🔐 **Secrets done right** | API keys live in VS Code SecretStorage (OS keychain), never in `settings.json` or logs |
 | 🧠 **Full AI capability surface** | Streaming, tool calling, reasoning/thinking output, vision input, system prompts |
 | 🛡️ **Production-grade reliability** | Retries with `Retry-After`, per-provider circuit breakers, timeouts everywhere, saturation-aware errors |
-| 🌊 **Live model catalogs** | CA-Omniroute and CA-AgentRouter discover models from your server at runtime — new models appear without updating the extension |
+| 🌊 **Live model catalogs** | OmniRoute and AgentRouter discover models from your server at runtime — new models appear without updating the extension |
 | 👁️ **Observable** | Unified diagnostics, per-request telemetry logs, live health states in the tree view |
 
-> **CA-Omniroute is a provider, not a middleman.** Its internal multi-provider
+> **OmniRoute is a provider, not a middleman.** Its internal multi-provider
 > routing lives entirely on the OmniRoute server; this extension only ever
 > talks to your configured base URL — exactly like any other vendor endpoint.
 
@@ -55,7 +55,6 @@ Copilot Amplify opens it up:
 - [Troubleshooting](#-troubleshooting)
 - [Development](#-development)
 - [Contributing](#-contributing)
-- [Documentation](#-documentation)
 - [License](#-license)
 
 ## 📦 Installation
@@ -100,96 +99,88 @@ Install via `Extensions: Install from VSIX…`.
 
 ## 🚀 Quick Start
 
-1. **Open the panel** — click the Copilot Amplify icon in the activity bar.
-2. **Add a key** — click the 🔑 icon on any provider row and paste your API key. It goes straight into your OS keychain.
-3. **Pick a model** — open Copilot Chat's model picker and choose e.g. *Z.ai · Glm 5.2*.
+1. **Open the panel**: click the Copilot Amplify icon in the activity bar.
+2. **Add a key**: click a provider marked *API key needed* and paste your key. It is stored in your system keychain.
+3. **Pick a model**: open Copilot Chat's model picker and choose one, for example *GLM 5.2*.
 4. **Chat.** That's it.
 
-No `settings.json` edits required. Full walkthrough with copy-paste recipes:
-**[`docs/usage-examples.md`](docs/usage-examples.md)**
+For OmniRoute, run **OmniRoute: Set Up…** instead of step 2; for OmniRoute and
+AgentRouter, select **Load Models** (the cloud icon on the row) before step 3.
+
+No `settings.json` edits required.
 
 ## 🔌 Supported Providers
 
 | Provider | Catalog | Highlights |
 |---|---|---|
-| **CA-Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
-| **CA-Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
-| **CA-Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
-| **CA-NVIDIA NIM** | Static (17 models) | Broad open-model catalog with transparent ID mapping |
-| **CA-Omniroute** | 🔄 Dynamic | Discovers models live from `GET /models`; custom chat endpoints supported; anonymous local operation |
-| **CA-AgentRouter** | 🔄 Dynamic | Discovers models from `GET /api/pricing`; routes Claude models to the native Anthropic `messages` API and everything else to the OpenAI-compatible endpoint; single API key covers both transports |
+| **Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
+| **Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
+| **Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
+| **NVIDIA NIM** | Static (9 models) | Broad open-model catalog with transparent ID mapping |
+| **OmniRoute** | 🔄 Dynamic | Loads models from your server (`GET /models`); works without a key when the server allows it |
+| **AgentRouter** | 🔄 Dynamic | Discovers models from `GET /api/pricing`; routes Claude models to the native Anthropic `messages` API and everything else to the OpenAI-compatible endpoint; single API key covers both transports |
 
 Capabilities shown in the picker are **truthful by design** — a model is only
 advertised with vision/tools/reasoning if it actually supports them.
 
 ## 🏗️ Architecture
 
+Every provider plugs into VS Code's Language Model API through one shared
+base class. A chat request takes this path:
+
 ```text
-VS Code
-    │
-    ▼
-VS Code Language Model API
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│          Copilot Amplify Core           │
-│                                         │
-│  Provider Registry   Model Catalogs     │
-│  Authentication      HTTP Transport     │
-│  Streaming / SSE     Retry / Timeout    │
-│  Circuit Breaker     Error Taxonomy     │
-│  Context / Converter Thinking / Tools   │
-│  Logging / Redaction Diagnostics        │
-└────────────────────┬────────────────────┘
-                     │
- CA-Xiaomi  CA-Z.ai  CA-Groq  CA-NVIDIA  CA-Omni
-                     │┬─────────────┐
-   ▼        ▼        ▼        ▼           ▼             ▼
- Xiaomi    Z.ai     Groq     NVIDIA    OmniRoute    CA-AgentRouter
- Provider  Provider Provider Provider  Provider       Provider
-   │         │        │         │           │             │
-   ▼         ▼        ▼         ▼           ▼             ▼
- MiMo API  Z.ai API Groq API NVIDIA NIM OmniRoute    Anthropic `/v1/messages`
-                                                 Server     + OpenAI `/v1/chat/completions`Server
-                                                 │
-                                     ┌───────────┼───────────┐
-                                     ▼           ▼           ▼
-                                 Provider A  Provider B  Provider C
+Copilot Chat
+  └─ BaseChatProvider.provideLanguageModelChatResponse
+       ├─ resolveApiKey()          key from SecretStorage (OmniRoute: optional)
+       ├─ runChatOperation()       retry with backoff + circuit breaker + health stats
+       │    └─ sendChatRequest()   pick the transport (AgentRouter: Claude → Anthropic API)
+       │         └─ consumeChatStream()   chunks → text / reasoning / tool-call parts
+       └─ throwMappedError()       HTTP status → readable message
 ```
 
-Adding a provider means adding one descriptor module + tests — no core changes.
-See **[docs/adding-a-provider.md](docs/adding-a-provider.md)** for the full guide.
+There are two kinds of provider:
+
+| Kind | Class | Providers | Models come from |
+|---|---|---|---|
+| Fixed catalog | `StaticChatProvider` | Xiaomi, Z.ai, Groq, NVIDIA | `src/core/models/catalog.ts` |
+| Dynamic catalog | `DynamicCatalogProvider` | OmniRoute, AgentRouter | the server, on **Load Models** / **Refresh** only |
+
+Dynamic providers never fetch on their own: VS Code asks for the model list
+often, so it only ever gets the cached list.
 
 <details>
 <summary><strong>Project layout</strong></summary>
 
 ```text
 src/
+├── extension.ts            # activate(): registry, tree, status bar, commands (no network I/O)
+├── secretsMigration.ts     # one-time move of old plaintext keys into SecretStorage
 ├── core/
-│   ├── api/            # GenericApiClient (OpenAI SDK), shared SSE parser
-│   ├── auth/           # SecretStorage-backed BaseAuthManager
-│   ├── context/        # LM↔wire converters, token estimation & truncation
-│   ├── errors/         # Normalized error taxonomy + HTTP mapping
-│   ├── logging/        # OutputChannel logger with secret redaction
-│   ├── models/         # Static model catalogs per fixed-catalog provider
-│   ├── provider/       # BaseChatProvider + ProviderRegistry
-│   ├── resilience/     # TTLCache (coalescing), CircuitBreaker, saturation classifier
-│   ├── retry/          # Backoff, jitter, Retry-After, cancellation
-│   ├── thinking/       # <think>/<thought> stream extraction
-│   ├── diagnostics.ts  # Unified credential-free report across providers
-│   └── url.ts          # Base URL validation / normalization / joining
+│   ├── provider/
+│   │   ├── baseChatProvider.ts        # the chat pipeline above
+│   │   ├── dynamicCatalogProvider.ts  # discovery, model cache, health for server catalogs
+│   │   └── registry.ts                # ProviderRegistry + the provider/descriptor interfaces
+│   ├── api/                # OpenAI-SDK client, Anthropic client, SSE parser, fetch helpers
+│   ├── auth/               # BaseAuthManager (SecretStorage)
+│   ├── context/            # VS Code messages → API messages, token estimate, trimming
+│   ├── resilience/         # circuit breaker, TTL cache, 503 classifier, network quality
+│   ├── retry/              # backoff + Retry-After
+│   ├── thinking/           # <think>…</think> extraction from streamed text
+│   ├── models/catalog.ts   # built-in model lists
+│   ├── logging/            # output-channel logger with secret redaction
+│   └── diagnostics.ts, globalConfig.ts, url.ts, util/
 ├── providers/
-│   ├── xiaomi/  zai/  groq/  nvidia/   # Fixed-catalog descriptors
-│   ├── omniroute/                      # Full dynamic provider module
-│   └── index.ts                        # Registry assembly
-├── commands/           # Command registrations
-├── ui/                 # Providers & Models tree view
-├── extension.ts        # Activation (lightweight, zero network I/O)
-└── secretsMigration.ts # One-time plaintext→SecretStorage migration
+│   ├── index.ts            # registers every provider
+│   ├── static/             # StaticChatProvider
+│   ├── xiaomi/ zai/ groq/ nvidia/      # one descriptor file each
+│   ├── omniroute/          # dynamic: config, API client, discovery, diagnostics
+│   └── agentrouter/        # dynamic: config, discovery, catalog, dual transport
+├── commands/               # command handlers (general + OmniRoute)
+└── ui/                     # sidebar tree, network-quality status bar
 tests/
-├── mocks/vscode.ts     # Minimal vscode API mock for unit tests
-├── helpers/sse.ts      # SSE stream builders
-└── unit/               # 21 files, 220+ cases incl. cross-provider contract tests
+├── mocks/vscode.ts         # the slice of the VS Code API the tests need
+├── helpers.ts              # fake SecretStorage, JSON/SSE responses
+└── *.test.ts
 ```
 
 </details>
@@ -208,7 +199,7 @@ Keys are stored via [`vscode.SecretStorage`](https://code.visualstudio.com/api/r
 Upgrading from 1.x? Plaintext settings entries are migrated automatically on
 first activation and then removed.
 
-> 💡 **CA-Omniroute anonymous mode:** no key needed for local servers — they work out of the box.
+> 💡 **OmniRoute without a key:** if your server allows anonymous access, you can skip the API key.
 
 ### General settings
 
@@ -222,7 +213,7 @@ first activation and then removed.
 | `copilot-amplify.circuitBreaker.failureThreshold` | `5` | Consecutive failures before a circuit opens |
 | `copilot-amplify.circuitBreaker.resetTimeoutSeconds` | `30` | Cooldown before a half-open probe |
 
-### CA-Omniroute settings
+### OmniRoute settings
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -235,9 +226,9 @@ first activation and then removed.
 | `copilot-amplify.CA-omniroute.modelCacheTtlSeconds` | `300` | Model discovery cache TTL |
 | `copilot-amplify.CA-omniroute.requestTimeoutMs` | `120000` | Chat request timeout |
 | `copilot-amplify.CA-omniroute.discoveryTimeoutMs` | `8000` | Discovery / connection-test timeout |
-| `copilot-amplify.CA-omniroute.warmupOnStartup` | `false` | Discover models at activation instea
+| `copilot-amplify.CA-omniroute.warmupOnStartup` | `false` | Load models when VS Code starts, instead of waiting for **Load Models** |
 
-### CA-AgentRouter settings
+### AgentRouter settings
 
 | Setting | Default | Purpose |
 |---|---|---|
@@ -245,7 +236,7 @@ first activation and then removed.
 | `copilot-amplify.CA-agentrouter.cacheTtlSeconds` | `300` | How long the discovered model list stays cached before refetching `GET {baseUrl}/api/pricing`. |
 | `copilot-amplify.CA-agentrouter.requestTimeoutMs` | `120000` | Chat request timeout (covers connection + full stream) for both transports. |
 | `copilot-amplify.CA-agentrouter.discoveryTimeoutMs` | `8000` | Catalog discovery / connection-test timeout. |
-| `copilot-amplify.CA-agentrouter.warmupOnStartup` | `false` | Discover models at activation instead of first use. |d of first use |
+| `copilot-amplify.CA-agentrouter.warmupOnStartup` | `false` | Load models when VS Code starts, instead of waiting for **Load Models** |
 | `copilot-amplify.CA-omniroute.logTelemetry` | `true` | Log routing/cost telemetry per request |
 
 Base URLs are normalized — these are all equivalent, no `//v1` accidents:
@@ -257,29 +248,24 @@ https://example.com/v1     https://example.com/v1/
 
 ## 🎮 Commands
 
-**General**
+All commands are in the Command Palette under **Copilot Amplify**. The sidebar
+offers the same actions: click a provider to set it up or test it, and
+right-click it for everything else.
 
-| Command | Description |
+| Command | What it does |
 |---|---|
-| `Copilot Amplify: Manage Providers…` | QuickPick hub: keys, tests, refresh, diagnostics |
-| `Copilot Amplify: Refresh Providers & Models` | Invalidate caches + re-discover |
-| `Copilot Amplify: Show Diagnostics` | Credential-free report for **all** providers |
-| `Copilot Amplify: Set / Clear API Key` | Credential management (context-aware in the tree) |
-| `Copilot Amplify: Test Connection` | Lightweight reachability + auth probe |
-| `Copilot Amplify: Pin / Unpin / Select Model` | Favorites and active model |
-
-**OmniRoute-specific**
-
-| Command | Description |
-|---|---|
-| `OmniRoute: Configure…` | Guided: base URL → optional key → test (chat endpoint is now fixed at `{baseUrl}/chat/completions`) |
-| `OmniRoute: Edit Base URL` | Quick base-URL override from the tree ACTIONS panel or the Manage QuickPick; busts the model cache and re-tests the connection. The base URL **must include the `/v1` path**. |
-| `OmniRoute: Set / Remove API Key` | SecretStorage credential management |
-| `OmniRoute: Test Connection` | Latency + chat-model count report |
-| `OmniRoute: Refresh Models` | Force re-discovery of `/models` |
-| `OmniRoute: Show Diagnostics` | Full configuration & health report |
-| `OmniRoute: Reset Configuration` | Restore defaults + clear stored key |
-| `Show Omniroute Telemetry` | Open the per-request telemetry log channel |
+| `Manage Providers…` | One menu for keys, tests, OmniRoute setup and troubleshooting |
+| `Set API Key…` / `Remove API Key` | Save or delete a provider's key (stored in your system keychain) |
+| `Test Connection` | Check that a provider is reachable and accepts your key |
+| `Refresh Providers and Models` | Reload model lists from OmniRoute and AgentRouter |
+| `Show Diagnostics` | Status, key presence and recent errors for every provider (never shows keys) |
+| `Show Network Quality` | Response time and error rate per provider |
+| `OmniRoute: Set Up…` | Server URL, optional key, then a connection test |
+| `OmniRoute: Change Server URL…` | Point the extension at another OmniRoute server (the URL must include `/v1`) |
+| `OmniRoute: Set API Key…` / `Remove API Key` | Manage the optional OmniRoute key |
+| `OmniRoute: Test Connection` / `Reload Models` | Check the server, reload its model list |
+| `OmniRoute: Show Diagnostics` / `Show Request Log` | Configuration report; route, latency and cost of each request |
+| `OmniRoute: Reset Settings…` | Restore OmniRoute defaults and remove its key |
 
 ## 🛡️ Reliability
 
@@ -287,7 +273,7 @@ https://example.com/v1     https://example.com/v1/
 - **Circuit breaker** — per-provider, settings-driven; open circuits reject *instantly* instead of burning backoff time; automatic half-open recovery probe.
 - **Timeouts** — separate request/discovery budgets; nothing hangs indefinitely.
 - **Saturation awareness** — `503/529` bodies are inspected to distinguish *queue saturation* from *maintenance*; errors tell you which and what it means.
-- **Live health** — `connected` · `not-configured` · `error` · `rate-limited` · `auth-failed`, reflected in the tree in real time.
+- **Live health**: each provider shows *Ready*, *Connected*, *API key needed*, *Rate limited* or *Connection problem* in the sidebar.
 - **Streaming** — hardened SSE parser: fragmented chunks, multi-event frames, CRLF, comments, `[DONE]`, malformed-frame tolerance, trailing flushes. Reasoning deltas stream as native thinking parts.
 - **Cancellation** — every request wires VS Code tokens into abort signals; cancelled streams release resources immediately.
 
@@ -301,33 +287,31 @@ https://example.com/v1     https://example.com/v1/
 
 ## 🩺 Troubleshooting
 
-| Symptom | Fix |
+| You see | What to do |
 |---|---|
-| *"Authentication failed (401)"* | Re-set the key (tree 🔑). Keys are **never** deleted automatically. `403` usually means region/access restrictions. |
-| OmniRoute shows no models | Run `OmniRoute: Test Connection`. Check diagnostics for the last discovery error; missing `/v1` in the Base URL is the usual culprit. |
-| *"circuit open"* errors | The breaker tripped after repeated failures. Wait out the cooldown or lower `failureThreshold`; disable entirely via `circuitBreaker.enabled`. |
-| New server model not in picker | `Refresh Providers & Models`. Non-chat entries (embeddings/rerank/TTS) are filtered by design. |
-| Requests feel stuck | Lower `requestTimeoutMs` / `omniroute.requestTimeoutMs`; enable `debugLogging` and check the output channel. |
-
-More walkthroughs: see the in-repo `docs/` guides.
+| *"… didn't accept your API key"* | Run `Set API Key…` for that provider. Keys are never deleted automatically. HTTP 403 usually means the key lacks access to that model or region. |
+| OmniRoute shows no models | Run `OmniRoute: Test Connection`. The URL must end in `/v1`; `Show Diagnostics` shows the last error. |
+| *"paused after repeated failures"* | The provider failed several times in a row and is paused for a short cooldown. Adjust it under **Settings › Copilot Amplify › Reliability**. |
+| A new server model is missing | Run `Refresh Providers and Models`. Non-chat models (embeddings, rerank, speech) are hidden on purpose. |
+| Replies seem stuck | Lower the request timeout in settings, turn on debug logging and check the **Copilot Amplify** output channel. |
 
 ## 💻 Development
 
 ```bash
 npm install
-npm run compile     # tsc build → out/
+npm run compile     # tsc → out/
 npm run watch       # incremental build
-npm run lint        # eslint (src + tests, typed)
 npm run typecheck   # tsc --noEmit (strict + noUncheckedIndexedAccess)
-npm test            # vitest — 223 tests, fully mocked, no real keys needed
+npm run lint        # eslint over src/ and tests/
+npm test            # vitest; the VS Code API is mocked, no real keys needed
 npm run package     # vsce → .vsix
 ```
 
-The test suite covers URL normalization, SSE robustness, retry semantics,
-circuit-breaker transitions, cache coalescing, error taxonomy, secret
-redaction, tool-call parsing, context-truncation integrity, OmniRoute
-discovery/filtering, connection testing, session handling, telemetry
-normalization, secrets migration, and a cross-provider contract suite.
+Press <kbd>F5</kbd> in VS Code to try your build in an Extension Development Host.
+
+Tests stub `fetch` and check what the extension actually sends and shows
+(request URL and body, health states, tree labels) rather than which
+internal methods were called. Copy the closest existing test when you add one.
 
 ### Publishing
 
@@ -335,23 +319,52 @@ Push a version tag — CI publishes to both registries and attaches the `.vsix` 
 
 ## 🤝 Contributing
 
-Contributions are welcome! Good first steps:
+Contributions are welcome. Before opening a PR, `npm run typecheck && npm run lint && npm test`
+must pass. Commits follow Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:` …).
 
-1. 📖 Read **[docs/adding-a-provider.md](docs/adding-a-provider.md)** — adding a provider requires exactly one descriptor module, registration wiring, and tests. No core changes.
-2. 🐛 Check [open issues](https://github.com/mojahid2021/copilot-amplify/issues) or file a bug with reproduction steps.
-3. ✅ Before opening a PR: `npm run typecheck && npm run lint && npm test` must pass.
-4. 📝 Follow Conventional Commits (`feat:`, `fix:`, `docs:` …).
+### Adding a fixed-catalog provider
 
-Design decisions are documented as ADRs in [`docs/adr/`](docs/adr/).
+Most providers need no new class, only a descriptor. Using Groq as the template:
 
-## 📚 Documentation
+1. Add the model list to `src/core/models/catalog.ts`.
+2. Create `src/providers/<name>/index.ts`:
 
-| Doc | Contents |
-|---|---|
-| [`docs/usage-examples.md`](docs/usage-examples.md) | Copy-paste setup recipes, endpoint examples, tuning, troubleshooting |
-| [`docs/adding-a-provider.md`](docs/adding-a-provider.md) | Step-by-step guide to contributing a new provider |
-| [`docs/adr/`](docs/adr/) | Architecture decision records |
-| [`CHANGELOG.md`](CHANGELOG.md) | Release history |
+   ```ts
+   export function createAcmeDescriptor(): AmplifyProviderDescriptor {
+     return {
+       id: 'acme',                                   // also add to ProviderId in core/provider/registry.ts
+       vendor: 'LuneCode.CA-acme',                   // must match package.json
+       displayName: 'CA-Acme',
+       treeIcon: 'rocket',                           // a codicon name
+       modelCountLabel: ACME_MODELS.length,
+       createAuth: (secrets) => new BaseAuthManager(secrets, 'copilot-amplify.CA-acme.apiKey', 'CA-Acme'),
+       createProvider: (auth) =>
+         new StaticChatProvider(auth, {
+           baseURL: 'https://api.acme.example/v1',   // any OpenAI-compatible endpoint
+           providerDisplayName: 'Acme',
+           models: ACME_MODELS,
+           errorMessages: { 401: 'Authentication failed. Please set a new key.' },
+           // optional: defaultTemperature, supportsThinking, mapModelId
+         }),
+     };
+   }
+   ```
+
+3. Register it in `src/providers/index.ts` (`registry.register(createAcmeDescriptor())`).
+4. Add the vendor to `contributes.languageModelChatProviders` in `package.json`.
+5. Add a case to `tests/staticProviders.test.ts` that checks the request URL and body.
+
+Subclass `StaticChatProvider` only when the provider really differs (see
+`providers/xiaomi`, which picks the URL from the key). A provider whose model
+list comes from its server extends `DynamicCatalogProvider` and implements
+`fetchModels`, `canLoadModels` and `testConnection` (see `providers/agentrouter`).
+
+### Ground rules
+
+- API keys live only in SecretStorage: never in settings, logs, error messages or test fixtures.
+- No network I/O during activation or in `provideLanguageModelChatInformation`.
+- A 401 from a provider must never delete the stored key (gateways return spurious 401s).
+- No new runtime dependencies without discussion; the VSIX ships only `openai`, `secure-json-parse` and `ts-pattern`.
 
 ## 📄 License
 

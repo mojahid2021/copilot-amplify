@@ -9,13 +9,9 @@ const BASE_URL = 'https://api.xiaomimimo.com/v1';
 const TOKEN_PLAN_URL = 'https://token-plan-sgp.xiaomimimo.com/v1';
 
 class XiaomiChatProvider extends StaticChatProvider {
-  protected override createProbeClient(apiKey: string): GenericApiClient {
-    const url = apiKey.startsWith('tp-') ? TOKEN_PLAN_URL : BASE_URL;
-    return new GenericApiClient(apiKey, url, 'Xiaomi MiMo', 0.7);
-  }
-
   protected override getApiClient(apiKey: string): GenericApiClient {
-    return this.createProbeClient(apiKey);
+    const url = apiKey.startsWith('tp-') ? TOKEN_PLAN_URL : BASE_URL;
+    return new GenericApiClient(apiKey, url, this.providerDisplayName, this.defaultTemperature);
   }
 }
 
@@ -23,25 +19,20 @@ export function createXiaomiDescriptor(): AmplifyProviderDescriptor & { id: Prov
   return {
     id: 'xiaomi',
     vendor: 'LuneCode.CA-xiaomi',
-    displayName: 'CA-Xiaomi MiMo',
+    displayName: 'Xiaomi MiMo',
     treeIcon: 'device-mobile',
     modelCountLabel: MIMO_MODELS.length,
     createAuth: (secrets) =>
-      new BaseAuthManager(secrets, 'copilot-amplify.CA-xiaomi.apiKey', 'CA-Xiaomi MiMo', 'xiaomi-mimo.apiKey'),
+      new BaseAuthManager(secrets, 'copilot-amplify.CA-xiaomi.apiKey', 'Xiaomi MiMo', 'xiaomi-mimo.apiKey'),
     createProvider: (auth) =>
       new XiaomiChatProvider(auth, {
         baseURL: BASE_URL,
         providerDisplayName: 'Xiaomi MiMo',
         models: MIMO_MODELS,
-        supportsThinking: false,
+        defaultTemperature: 0.7,
         errorMessages: {
-          400: 'Invalid request format. Check parameters and message format.',
-          401: 'Authentication failed. Use the Manage command to set a new key.',
-          403: 'Access denied. The service may not be available in your region, or your API key is restricted.',
-          421: 'Request blocked by content filter. Avoid unsafe or sensitive content.',
-          429: 'Rate limit reached. Please wait and try again.',
-          500: 'MiMo server error. Please try again later.',
-          503: 'MiMo server overloaded. Please try again later.',
+          403: 'Xiaomi MiMo denied access. The service may not be available in your region, or your API key is restricted.',
+          421: "The request was blocked by Xiaomi MiMo's content filter. Try rephrasing it.",
         },
       }),
   };

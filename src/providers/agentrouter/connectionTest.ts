@@ -8,8 +8,8 @@
  * a reachability probe.
  */
 
-import { joinEndpoint, validateBaseUrl } from '../../core/url';
-import { getAgentrouterConfig, getAgentrouterDiscoveryBaseUrl } from './config';
+import { validateBaseUrl } from '../../core/url';
+import { getAgentrouterConfig } from './config';
 import { fetchAgentrouterPricing } from './discovery';
 import type { ConnectionTestResult } from '../../core/provider/registry';
 
@@ -26,33 +26,26 @@ export async function testAgentrouterConnection(
   if (!validation.ok) {
     return {
       ok: false,
-      message: `Invalid Base URL — ${validation.error ?? 'malformed URL'}`,
+      message: `The server URL is not valid. ${validation.error ?? ''}`.trim(),
     };
   }
 
   const cfg = getAgentrouterConfig();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), cfg.discoveryTimeoutMs);
-  timer.unref?.();
   const started = Date.now();
 
   try {
     const models = await fetchAgentrouterPricing({
-      baseUrl: joinEndpoint(args.baseUrl, ''),
-      ...(args.apiKey && args.apiKey.trim().length > 0 ? { apiKey: args.apiKey.trim() } : {}),
+      baseUrl: args.baseUrl,
+      apiKey: args.apiKey,
       timeoutMs: cfg.discoveryTimeoutMs,
       fetchImpl: args.fetchImpl,
-    }).catch((error): Map<string, never> => {
-      // Translate the fetch error into a ConnectionTestResult-friendly throw so the
-      // outer catch below produces a consistent user-facing message.
-      throw error;
     });
 
     const latencyMs = Date.now() - started;
     if (models.size === 0) {
       return {
         ok: true,
-        message: 'Connected, but no models are available yet',
+        message: 'Connected, but the server lists no models yet',
         latencyMs,
       };
     }
@@ -64,21 +57,21 @@ export async function testAgentrouterConnection(
     };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      return { ok: false, message: `Timed out after ${cfg.discoveryTimeoutMs} ms` };
+      return { ok: false, message: `No response within ${cfg.discoveryTimeoutMs / 1000} seconds` };
     }
     // ApiError carries the status; pass it through for actionable feedback.
     const status = (error as { statusCode?: unknown }).statusCode;
     if (status === 401 || status === 403) {
       return {
         ok: false,
-        message: 'Authentication failed',
+        message: 'Your API key was not accepted',
         httpStatus: typeof status === 'number' ? status : undefined,
       };
     }
     if (status === 404) {
       return {
         ok: false,
-        message: 'Pricing endpoint not found — check the Base URL includes the correct path',
+        message: 'The server has no /api/pricing endpoint. Check the AgentRouter URL in settings',
         httpStatus: 404,
       };
     }
@@ -86,10 +79,5 @@ export async function testAgentrouterConnection(
       ok: false,
       message: error instanceof Error ? error.message : String(error),
     };
-  } finally {
-    clearTimeout(timer);
   }
 }
-
-/** Re-export so callers don't need a second import path. */
-export { getAgentrouterDiscoveryBaseUrl };

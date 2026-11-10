@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { normalizeBaseUrl } from '../../core/url';
-import { createCachedConfig } from '../../core/util/cachedConfig';
+import { createCachedConfig, positiveNumber } from '../../core/util/cachedConfig';
 
 /**
  * Central configuration for the OmniRoute provider.
@@ -11,11 +11,8 @@ import { createCachedConfig } from '../../core/util/cachedConfig';
 
 const SECTION = 'copilot-amplify.CA-omniroute';
 const DEFAULT_BASE_URL = 'http://localhost:20128/v1';
-const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_DISCOVERY_TIMEOUT_MS = 8_000;
-
-export { DEFAULT_BASE_URL };
 
 export interface OmnirouteConfig {
   /** Base URL of the OmniRoute server, including the `/v1` prefix if used. */
@@ -42,12 +39,7 @@ export interface OmnirouteConfig {
   logTelemetry: boolean;
 }
 
-function positiveNumber(value: number | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
 const _cache = createCachedConfig(SECTION, (cfg: vscode.WorkspaceConfiguration): OmnirouteConfig => {
-  const modelCacheTtlSeconds = cfg.get<number>('modelCacheTtlSeconds', 300);
   const rawBaseUrl = cfg.get<string>('baseUrl') ?? '';
   return {
     baseUrl: normalizeBaseUrl(rawBaseUrl, DEFAULT_BASE_URL),
@@ -57,9 +49,7 @@ const _cache = createCachedConfig(SECTION, (cfg: vscode.WorkspaceConfiguration):
     compression: (cfg.get<string>('compression') ?? '').trim(),
     sessionId: (cfg.get<string>('sessionId') ?? '').trim(),
     progress: cfg.get<boolean>('progress', false),
-    modelCacheTtlMs: positiveNumber(modelCacheTtlSeconds, DEFAULT_CACHE_TTL_MS / 1000) > 0
-      ? Math.max(10, modelCacheTtlSeconds) * 1000
-      : DEFAULT_CACHE_TTL_MS,
+    modelCacheTtlMs: Math.max(10, cfg.get<number>('modelCacheTtlSeconds', 300)) * 1000,
     requestTimeoutMs: positiveNumber(cfg.get<number>('requestTimeoutMs'), DEFAULT_REQUEST_TIMEOUT_MS),
     discoveryTimeoutMs: positiveNumber(cfg.get<number>('discoveryTimeoutMs'), DEFAULT_DISCOVERY_TIMEOUT_MS),
     logTelemetry: cfg.get<boolean>('logTelemetry', true),

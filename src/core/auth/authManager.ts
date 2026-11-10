@@ -13,11 +13,7 @@ export class BaseAuthManager implements vscode.Disposable {
 
   readonly onDidChangeApiKey = this.onDidChangeApiKeyEmitter.event;
 
-  /**
-   * Cached value of the most recent `getApiKey()` lookup. Hot-path chat
-   * requests can satisfy the lookup without two `secrets.get` round trips
-   * per call. Cleared whenever the key is mutated.
-   */
+  /** Saves two SecretStorage reads per chat request. Cleared whenever the key changes. */
   private cachedKey?: string;
 
   constructor(
@@ -33,8 +29,6 @@ export class BaseAuthManager implements vscode.Disposable {
   }
 
   async getApiKey(): Promise<string | undefined> {
-    // Hot path: most chat calls arrive in quick succession and the same
-    // key keeps being used. Cache avoids two `secrets.get` reads per call.
     if (this.cachedKey !== undefined) {
       return this.cachedKey;
     }
@@ -73,22 +67,15 @@ export class BaseAuthManager implements vscode.Disposable {
     this.onDidChangeApiKeyEmitter.fire();
   }
 
-  /**
-   * Prompt the user for an API key and persist it.
-   * Resolves undefined when dismissed.
-   */
+  /** Ask for an API key and save it. Resolves undefined when the user cancels. */
   async promptForApiKey(): Promise<string | undefined> {
     const input = await vscode.window.showInputBox({
-      prompt: `Enter your ${this.displayName} API Key`,
+      title: `${this.displayName} API Key`,
+      prompt: 'Paste your API key. It is stored in your system keychain, never in settings.',
+      placeHolder: 'API key',
       password: true,
-      placeHolder: 'your-api-key',
       ignoreFocusOut: true,
-      validateInput: (value) => {
-        if (!value || value.trim().length === 0) {
-          return 'API key cannot be empty';
-        }
-        return undefined;
-      },
+      validateInput: (value) => (value.trim() ? undefined : 'Enter an API key, or press Escape to cancel.'),
     });
 
     if (!input) {
@@ -99,15 +86,11 @@ export class BaseAuthManager implements vscode.Disposable {
     await this.secrets.store(this.secretKey, key);
     this.cachedKey = key;
     this.onDidChangeApiKeyEmitter.fire();
-    vscode.window.showInformationMessage(`${this.displayName} API key saved successfully`);
+    void vscode.window.showInformationMessage(`${this.displayName} API key saved.`);
     return key;
   }
 
   async getOrPromptApiKey(): Promise<string | undefined> {
     return (await this.getApiKey()) ?? this.promptForApiKey();
-  }
-
-  hasApiKey(): Thenable<boolean> {
-    return this.secrets.get(this.secretKey).then((key) => key !== undefined || (this.legacySecretKey !== undefined ? this.secrets.get(this.legacySecretKey).then((legacy) => legacy !== undefined) : false));
   }
 }

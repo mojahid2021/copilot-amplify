@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.4.0] - Unreleased
+
+### Added
+
+- **Network quality** in the status bar and the **Show Network Quality** command: time to first token and error rate for the provider you used last.
+- **Show Diagnostics** is now available from the Command Palette.
+- Removing an API key now asks for confirmation.
+
+### Changed
+
+- **Clearer sidebar.** Providers are listed directly (Favorites appear above them once you pin a model). Each row shows a plain status such as *Ready · 7 models*, *API key needed* or *Server URL needed*, with one inline action; everything else is on right-click. Empty providers show a clickable next step.
+- Diagnostics, Network Quality, Documentation and Report an Issue moved from the tree into the view's title bar.
+- All commands are grouped under **Copilot Amplify** in the Command Palette; commands that only work from the sidebar are hidden there.
+- Notifications are short single sentences with a button for the usual fix (for example *Update API Key*). Error messages in Chat explain what happened in plain language.
+- Settings are grouped into **General**, **Reliability**, **OmniRoute** and **AgentRouter**, with corrected descriptions.
+- Selecting a model in the sidebar now says what it does: it marks the model and reminds you to choose it in Copilot Chat's model picker.
+
+### Fixed
+
+- Reasoning inside `<think>…</think>` is folded into a Thinking block again, and ordinary `<details>` HTML in answers is left alone.
+- Pressing **Stop** no longer counts as a provider failure (five stops in a row used to pause the provider for 30 seconds).
+- Dropped connections and timeouts are retried, and a rate-limited request is no longer sent up to eight times.
+- Long agent sessions with large tool results no longer lose every message when the context is trimmed.
+- Tool arguments containing `__proto__` are rejected as intended.
+- Providers with a saved key showed *No API key* until their first request.
+- **Remove API Key** from the Command Palette did nothing after you picked a provider.
+- Changing `requestTimeoutMs` now applies without reloading VS Code.
+
 ## [2.3.0] - 2026-10-26
 
 Performance, UI, and reliability release. Eliminates excess CPU and IPC overhead, restructures the sidebar tree, adds user-initiated model discovery, and requires an explicit server URL for OmniRoute. No breaking changes to commands or settings.

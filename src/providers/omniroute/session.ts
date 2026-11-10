@@ -12,17 +12,6 @@
 
 let generatedSessionId: string | undefined;
 
-function generateSessionId(): string {
-  try {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-  } catch {
-    /* fall through to Math.random */
-  }
-  return `sess-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
 /**
  * Resolve the session id to send: explicit override → generated window id.
  * Empty string when the caller should send nothing.
@@ -32,11 +21,6 @@ export function resolveOmnirouteSessionId(explicit: string | undefined): string 
   if (trimmed) {
     return trimmed;
   }
-  generatedSessionId ??= generateSessionId();
+  generatedSessionId ??= crypto.randomUUID();
   return generatedSessionId;
-}
-
-/** Test hook: forget the generated id. */
-export function resetGeneratedSessionId(): void {
-  generatedSessionId = undefined;
 }

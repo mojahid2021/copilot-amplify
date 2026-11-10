@@ -1,7 +1,5 @@
 /**
- * Shared Server-Sent Events parser.
- *
- * Handles every real-world quirk providers exhibit:
+ * Server-Sent Events parser shared by the hand-written HTTP clients. Handles:
  * - frames fragmented across chunk boundaries
  * - multiple events per network chunk
  * - CRLF and LF line endings

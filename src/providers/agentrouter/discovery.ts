@@ -12,14 +12,9 @@
  * instantiating a `BaseChatProvider`.
  */
 
-import * as vscode from 'vscode';
 import { joinEndpoint } from '../../core/url';
-import { ApiError } from '../../core/api/client';
-import { logger } from '../../core/logging/logger';
-import { getAgentrouterConfig, getAgentrouterDiscoveryBaseUrl } from './config';
-import { AGENTROUTER_DISPLAY_NAME } from './descriptor';
-
-const log = logger.child({ provider: AGENTROUTER_DISPLAY_NAME });
+import { apiErrorFromResponse, createRequestSignal } from '../../core/api/http';
+import { getAgentrouterConfig } from './config';
 
 /** Endpoint protocols AgentRouter advertises for a model. */
 export type AgentrouterEndpointType = 'anthropic' | 'openai';
@@ -44,10 +39,6 @@ export interface DiscoveredAgentrouterModel {
   id: string;
   /** Endpoint types AgentRouter advertises for this model. */
   supportedEndpointTypes: AgentrouterEndpointType[];
-  /** Pricing ratio for input tokens (informational; reserved for future use). */
-  modelRatio?: number;
-  /** Pricing ratio for output tokens (informational). */
-  completionRatio?: number;
 }
 
 const MAX_ENTRIES = 512;
@@ -68,10 +59,6 @@ function normalizeEndpointTypes(value: unknown): AgentrouterEndpointType[] {
   return out;
 }
 
-function toFiniteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
 /**
  * Map a single raw pricing entry into a normalized discovered model.
  * Returns `undefined` for entries that lack a usable `model_name`.
@@ -82,15 +69,9 @@ export function mapAgentrouterModel(
   if (!raw || typeof raw.model_name !== 'string' || raw.model_name.trim().length === 0) {
     return undefined;
   }
-  const id = raw.model_name.trim();
-  const modelRatio = toFiniteNumber(raw.model_ratio);
-  const completionRatio = toFiniteNumber(raw.completion_ratio);
-  const types = normalizeEndpointTypes(raw.supported_endpoint_types);
   return {
-    id,
-    supportedEndpointTypes: types,
-    ...(modelRatio !== undefined ? { modelRatio } : {}),
-    ...(completionRatio !== undefined ? { completionRatio } : {}),
+    id: raw.model_name.trim(),
+    supportedEndpointTypes: normalizeEndpointTypes(raw.supported_endpoint_types),
   };
 }
 
@@ -126,96 +107,38 @@ export interface FetchAgentrouterPricingArgs {
   baseUrl: string;
   apiKey?: string;
   timeoutMs: number;
-  token?: vscode.CancellationToken;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
 }
 
 /**
- * Low-level `GET {baseUrl}/api/pricing` returning a normalized model map.
- * Throws `ApiError` on non-2xx responses (status preserved). Headers
- * (notably `Retry-After`) are captured for the caller.
+ * `GET {baseUrl}/api/pricing` as a model map keyed by id.
+ * Throws `ApiError` on non-2xx responses (status and headers preserved).
  */
 export async function fetchAgentrouterPricing(
   args: FetchAgentrouterPricingArgs,
 ): Promise<Map<string, DiscoveredAgentrouterModel>> {
-  const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), args.timeoutMs);
-  timeout.unref?.();
-  const cancellationDisposable = args.token?.onCancellationRequested(() => abortController.abort());
-  const onExternalAbort = () => abortController.abort();
-  if (args.signal) {
-    if (args.signal.aborted) {
-      abortController.abort();
-    } else {
-      args.signal.addEventListener('abort', onExternalAbort, { once: true });
-    }
-  }
-
+  const request = createRequestSignal(args);
   try {
-    const endpoint = joinEndpoint(args.baseUrl, '/api/pricing');
-    const headers: Record<string, string> = {};
-    const key = args.apiKey && args.apiKey.trim().length > 0 ? args.apiKey.trim() : '';
-    if (key) {
-      headers['Authorization'] = `Bearer ${key}`;
-    }
-
-    const response = await (args.fetchImpl ?? fetch)(endpoint, {
-      headers,
-      signal: abortController.signal,
+    const key = args.apiKey?.trim();
+    const response = await (args.fetchImpl ?? fetch)(joinEndpoint(args.baseUrl, '/api/pricing'), {
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+      signal: request.signal,
     });
-
     if (!response.ok) {
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch {
-        body = undefined;
-      }
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[key.toLowerCase()] = value;
-      });
-      throw new ApiError(
-        `AgentRouter pricing endpoint returned HTTP ${response.status}`,
-        response.status,
-        body,
-        responseHeaders,
-      );
+      throw await apiErrorFromResponse(response, 'AgentRouter pricing endpoint error');
     }
-
-    const json = (await response.json()) as AgentrouterPricingResponse;
-    return mapAgentrouterPricingResponse(json);
+    return mapAgentrouterPricingResponse((await response.json()) as AgentrouterPricingResponse);
   } finally {
-    clearTimeout(timeout);
-    args.signal?.removeEventListener('abort', onExternalAbort);
-    cancellationDisposable?.dispose();
+    request.dispose();
   }
 }
 
-/**
- * Convenience wrapper that reads the active configuration and calls
- * {@link fetchAgentrouterPricing}. Used by the provider class so the
- * request semantics are uniform with the rest of the codebase.
- */
-export async function fetchAgentrouterPricingFromConfig(args: {
+/** {@link fetchAgentrouterPricing} against the configured base URL and timeout. */
+export function fetchAgentrouterPricingFromConfig(args: {
   apiKey?: string;
-  token?: vscode.CancellationToken;
   signal?: AbortSignal;
-  fetchImpl?: typeof fetch;
 }): Promise<Map<string, DiscoveredAgentrouterModel>> {
   const cfg = getAgentrouterConfig();
-  return fetchAgentrouterPricing({
-    baseUrl: getAgentrouterDiscoveryBaseUrl(),
-    ...(args.apiKey ? { apiKey: args.apiKey } : {}),
-    timeoutMs: cfg.discoveryTimeoutMs,
-    ...(args.token ? { token: args.token } : {}),
-    ...(args.signal ? { signal: args.signal } : {}),
-    ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
-  }).catch((error) => {
-    log.warn('pricing fetch failed', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  });
+  return fetchAgentrouterPricing({ ...args, baseUrl: cfg.baseUrl, timeoutMs: cfg.discoveryTimeoutMs });
 }

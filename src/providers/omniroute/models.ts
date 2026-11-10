@@ -6,7 +6,7 @@
  */
 import type * as vscode from 'vscode';
 import { joinEndpoint } from '../../core/url';
-import { ApiError } from '../../core/api/client';
+import { apiErrorFromResponse, createRequestSignal } from '../../core/api/http';
 
 export interface OmnirouteModelCapabilities {
   tool_calling?: boolean;
@@ -96,7 +96,7 @@ export function isChatModel(model: OmnirouteModelRaw): boolean {
     }
   }
 
-  // No modality info — most Omniroute models are chat models.
+  // No modality info — most OmniRoute models are chat models.
   return true;
 }
 
@@ -128,12 +128,6 @@ export function rawModelSupportsThinking(model: OmnirouteModelRaw, id: string): 
   return idLikelySupportsThinking(stripNoThinkingPrefix(id));
 }
 
-export function rawAdvertisesTemperature(model: OmnirouteModelRaw): boolean | undefined {
-  return typeof model.capabilities?.temperature === 'boolean'
-    ? model.capabilities.temperature
-    : undefined;
-}
-
 /** Heuristic over ids known to expose reasoning capability. */
 export function idLikelySupportsThinking(originalId: string): boolean {
   return /thinking|reasoning|reason|cogito|qwq|deepseek-r1/i.test(originalId);
@@ -163,7 +157,7 @@ export function toDisplayName(raw: OmnirouteModelRaw, id: string): string {
       .join(' ');
   }
 
-  return isNoThinkingVariant(id) ? `${display} (No-thinking)` : display;
+  return isNoThinkingVariant(id) ? `${display} (reasoning off)` : display;
 }
 
 /**
@@ -211,8 +205,8 @@ export function mapOmnirouteModel(raw: OmnirouteModelRaw, originalId: string): M
       name: toDisplayName(raw, originalId),
       family: 'omniroute',
       version: originalId,
-      tooltip: isNoThinkingVariant(originalId) ? 'Omniroute · No-thinking' : 'Omniroute',
-      detail: isNoThinkingVariant(originalId) ? 'Omniroute · No-thinking' : 'Omniroute',
+      tooltip: isNoThinkingVariant(originalId) ? 'OmniRoute · reasoning off' : 'OmniRoute',
+      detail: isNoThinkingVariant(originalId) ? 'OmniRoute · reasoning off' : 'OmniRoute',
       maxInputTokens: maxInput,
       maxOutputTokens: maxOutput,
       capabilities: {
@@ -237,7 +231,8 @@ export function mapOmnirouteModelsResponse(json: OmnirouteModelsResponse): Mappe
     .map((model) => mapOmnirouteModel(model, model.id));
 }
 
-const ANONYMOUS_KEY = 'omniroute';
+/** Sent as the bearer token when the user has not set a key (OmniRoute allows anonymous use). */
+export const ANONYMOUS_KEY = 'omniroute';
 
 export interface FetchModelsArgs {
   baseUrl: string;
@@ -245,74 +240,26 @@ export interface FetchModelsArgs {
   timeoutMs: number;
   token?: vscode.CancellationToken;
   fetchImpl?: typeof fetch;
-  /** External abort signal — when aborted, the request is canceled cooperatively. */
   signal?: AbortSignal;
 }
 
 /**
- * Low-level `GET {baseUrl}/models` returning validated chat models.
- * Throws ApiError on non-2xx responses (status preserved).
+ * `GET {baseUrl}/models`, filtered to chat models.
+ * Throws `ApiError` on non-2xx responses; network and abort errors pass through.
  */
 export async function fetchOmnirouteModels(args: FetchModelsArgs): Promise<MappedOmnirouteModel[]> {
-  const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), args.timeoutMs);
-  timeout.unref?.();
-  const cancellationDisposable = args.token?.onCancellationRequested(() => abortController.abort());
-  // Bridge the external signal into our internal AbortController.
-  const onExternalAbort = () => abortController.abort();
-  if (args.signal) {
-    if (args.signal.aborted) {
-      abortController.abort();
-    } else {
-      args.signal.addEventListener('abort', onExternalAbort, { once: true });
-    }
-  }
-
+  const request = createRequestSignal(args);
   try {
-    const endpoint = joinEndpoint(args.baseUrl, '/models');
-    const key = args.apiKey && args.apiKey.trim().length > 0 ? args.apiKey.trim() : ANONYMOUS_KEY;
-
-    const response = await (args.fetchImpl ?? fetch)(endpoint, {
+    const key = args.apiKey?.trim() || ANONYMOUS_KEY;
+    const response = await (args.fetchImpl ?? fetch)(joinEndpoint(args.baseUrl, '/models'), {
       headers: { Authorization: `Bearer ${key}` },
-      signal: abortController.signal,
+      signal: request.signal,
     });
-
     if (!response.ok) {
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch {
-        body = undefined;
-      }
-      // Capture headers so Retry-After from discovery responses is honored.
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        headers[key.toLowerCase()] = value;
-      });
-      throw toApiError(response.status, body, headers);
+      throw await apiErrorFromResponse(response, 'OmniRoute API error');
     }
-
-    const json = (await response.json()) as OmnirouteModelsResponse;
-    return mapOmnirouteModelsResponse(json);
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    throw error; // AbortError / network errors handled by callers
+    return mapOmnirouteModelsResponse((await response.json()) as OmnirouteModelsResponse);
   } finally {
-    clearTimeout(timeout);
-    args.signal?.removeEventListener('abort', onExternalAbort);
-    cancellationDisposable?.dispose();
+    request.dispose();
   }
-}
-
-function toApiError(status: number, body: unknown, headers?: Record<string, string>): ApiError {
-  let detail = '';
-  if (body && typeof body === 'object') {
-    const error = (body as { error?: { message?: unknown } }).error;
-    if (error && typeof error.message === 'string') {
-      detail = error.message;
-    }
-  }
-  return new ApiError(`Omniroute API error: ${status}${detail ? ` ${detail}` : ''}`, status, body, headers);
 }

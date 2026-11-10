@@ -1,21 +1,17 @@
 import * as vscode from 'vscode';
-import type { ProviderRegistry, ProviderTreeModel } from '../core/provider/registry';
-import type { ProviderHealth, ProviderId } from '../core/provider/registry';
+import type { AmplifyProviderDescriptor, ProviderHealth, ProviderId, ProviderRegistry, ProviderTreeModel } from '../core/provider/registry';
+import type { NetworkQuality } from '../core/resilience/networkQuality';
 
 /**
- * Providers & Models tree.
+ * The "Providers & Models" sidebar.
  *
- * Structure:
- *   FAVORITES (if any pinned models)
- *   PROVIDERS  — each provider row is collapsible; expanding shows its models
- *   ACTIONS
+ *   Favorites            (only when something is pinned)
+ *   Providers            (a provider row expands into its models)
  *
- * Model lists come from each provider's cached data — expanding never triggers
- * network I/O. Dynamic providers (OmniRoute, AgentRouter) show a "Not loaded"
- * hint when no models have been fetched yet; use the ↓ Load Models inline button.
+ * Without favorites the providers are shown at the top level. Rendering never
+ * does network I/O: model lists come from what each provider has cached.
+ * Tool actions (diagnostics, docs, …) live in the view's title bar.
  */
-
-// ─── Tree item interfaces ────────────────────────────────────────────────────
 
 export interface ProviderTreeItem extends vscode.TreeItem {
   providerId: string;
@@ -23,7 +19,7 @@ export interface ProviderTreeItem extends vscode.TreeItem {
 }
 
 export interface SectionTreeItem extends vscode.TreeItem {
-  sectionId: string;
+  sectionId: 'favorites' | 'providers';
   contextValue: 'section';
 }
 
@@ -33,29 +29,12 @@ export interface ModelTreeItem extends vscode.TreeItem {
   contextValue: 'model' | 'favorite-model';
 }
 
-export interface ActionTreeItem extends vscode.TreeItem {
-  actionId: string;
-  contextValue: 'action';
+/** A one-line "what to do next" row shown when a provider has no models yet. */
+interface HintTreeItem extends vscode.TreeItem {
+  contextValue: 'hint';
 }
 
-type AnyTreeItem = ProviderTreeItem | SectionTreeItem | ModelTreeItem | ActionTreeItem;
-
-// ─── Action catalogue ────────────────────────────────────────────────────────
-
-const ACTIONS = [
-  { id: 'refresh', label: 'Refresh Providers & Models', icon: 'sync', command: 'copilot-amplify.refresh' },
-  { id: 'diagnostics', label: 'Show Diagnostics', icon: 'pulse', command: 'copilot-amplify.showDiagnostics' },
-  { id: 'docs', label: 'View Documentation & Guide', icon: 'book', command: 'copilot-amplify.documentation' },
-  { id: 'report', label: 'Report Issue or Feedback', icon: 'bug', command: 'copilot-amplify.report' },
-];
-
-// Actions that live under the OmniRoute provider row when expanded (not in global ACTIONS).
-const OMNIROUTE_ACTIONS = [
-  { id: 'omniroute-diagnostics', label: 'Show OmniRoute Diagnostics', icon: 'pulse', command: 'copilot-amplify.CA-omniroute.showDiagnostics' },
-  { id: 'telemetry', label: 'Show Telemetry Logs', icon: 'output', command: 'copilot-amplify.CA-omniroute.showTelemetry' },
-];
-
-// ─── Tree data provider ───────────────────────────────────────────────────────
+type AnyTreeItem = ProviderTreeItem | SectionTreeItem | ModelTreeItem | HintTreeItem;
 
 interface PinnedModel {
   providerId: string;
@@ -63,30 +42,34 @@ interface PinnedModel {
   name: string;
 }
 
+/** Health → short status shown next to the provider name. */
+type Status = { text: string; color?: string; ready: boolean };
+
 export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTreeItem>, vscode.Disposable {
-  private _onDidChangeTreeData = new vscode.EventEmitter<AnyTreeItem | undefined | void>();
-  readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  private readonly changeEmitter = new vscode.EventEmitter<AnyTreeItem | undefined | void>();
+  readonly onDidChangeTreeData = this.changeEmitter.event;
 
   private pinnedModels: PinnedModel[] = [];
-  private activeProviderId = 'xiaomi';
+  private activeProviderId = '';
   private activeModelId = '';
+  /** Whether each provider has a key; filled once, then kept current by key-change events. */
   private readonly apiKeyCache = new Map<string, boolean>();
-  private readonly _disposables: vscode.Disposable[] = [];
+  private readonly disposables: vscode.Disposable[] = [];
 
   constructor(
     private readonly registry: ProviderRegistry,
     private readonly context?: vscode.ExtensionContext,
   ) {
-    if (this.context) {
-      this.pinnedModels = this.context.globalState.get('pinnedModels', []);
-      this.activeProviderId = this.context.globalState.get('activeProviderId', 'xiaomi');
-      this.activeModelId = this.context.globalState.get('activeModelId', '');
+    if (context) {
+      this.pinnedModels = context.globalState.get('pinnedModels', []);
+      this.activeProviderId = context.globalState.get('activeProviderId', '');
+      this.activeModelId = context.globalState.get('activeModelId', '');
     }
     for (const descriptor of registry.list()) {
-      this._disposables.push(
-        registry.auth(descriptor.id).onDidChangeApiKey(async () => {
-          const key = await registry.auth(descriptor.id).getApiKey();
-          this.apiKeyCache.set(descriptor.id, Boolean(key));
+      const auth = registry.auth(descriptor.id);
+      this.disposables.push(
+        auth.onDidChangeApiKey(async () => {
+          this.apiKeyCache.set(descriptor.id, Boolean(await auth.getApiKey()));
           this.refresh();
         }),
       );
@@ -94,21 +77,22 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
   }
 
   dispose(): void {
-    this._onDidChangeTreeData.dispose();
-    for (const d of this._disposables) d.dispose();
+    this.changeEmitter.dispose();
+    for (const disposable of this.disposables) {
+      disposable.dispose();
+    }
   }
 
   refresh(): void {
-    this._onDidChangeTreeData.fire();
+    this.changeEmitter.fire();
   }
 
-  setActiveModel(providerId: string, modelId: string): void {
+  setActiveModel(providerId: string, modelId: string, modelName: string): void {
     this.activeProviderId = providerId;
     this.activeModelId = modelId;
-    if (this.context) {
-      this.context.globalState.update('activeProviderId', providerId);
-      this.context.globalState.update('activeModelId', modelId);
-    }
+    void this.context?.globalState.update('activeProviderId', providerId);
+    void this.context?.globalState.update('activeModelId', modelId);
+    void this.context?.globalState.update('activeModelName', modelName);
     this.refresh();
   }
 
@@ -116,312 +100,205 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     if (!this.pinnedModels.some((m) => m.providerId === providerId && m.modelId === modelId)) {
       this.pinnedModels.push({ providerId, modelId, name });
       this.savePinnedModels();
-      this.refresh();
     }
   }
 
   unpinModel(providerId: string, modelId: string): void {
-    this.pinnedModels = this.pinnedModels.filter(
-      (m) => !(m.providerId === providerId && m.modelId === modelId),
-    );
+    this.pinnedModels = this.pinnedModels.filter((m) => !(m.providerId === providerId && m.modelId === modelId));
     this.savePinnedModels();
-    this.refresh();
-  }
-
-  private savePinnedModels(): void {
-    if (this.context) {
-      this.context.globalState.update('pinnedModels', this.pinnedModels);
-    }
   }
 
   getTreeItem(element: AnyTreeItem): vscode.TreeItem {
     return element;
   }
 
-  getChildren(element?: AnyTreeItem): vscode.ProviderResult<AnyTreeItem[]> {
-    if (!element) { return this.getRootSections(); }
-    if (element.contextValue === 'section') {
-      return this.getSectionChildren((element as SectionTreeItem).sectionId);
+  async getChildren(element?: AnyTreeItem): Promise<AnyTreeItem[]> {
+    if (!element) {
+      return this.pinnedModels.length > 0
+        ? [section('favorites', 'Favorites', 'star-full'), section('providers', 'Providers', 'layers')]
+        : this.getProviderItems();
     }
-    if (element.contextValue === 'provider' || element.contextValue === 'dynamic-provider' || element.contextValue === 'omniroute-provider') {
-      return this.getModelsForProvider((element as ProviderTreeItem).providerId as ProviderId);
+    switch (element.contextValue) {
+      case 'section':
+        return element.sectionId === 'favorites' ? this.getFavoriteItems() : this.getProviderItems();
+      case 'provider':
+      case 'dynamic-provider':
+      case 'omniroute-provider':
+        return this.getModelItems(element.providerId as ProviderId);
+      default:
+        return [];
     }
-    return [];
   }
 
-  private getRootSections(): SectionTreeItem[] {
-    const sections: SectionTreeItem[] = [];
-    if (this.pinnedModels.length > 0) {
-      sections.push(this.mkSection('favorites', 'FAVORITES', 'star-full', false));
-    }
-    sections.push(
-      this.mkSection('providers', 'PROVIDERS', 'layers', false),
-      this.mkSection('actions', 'ACTIONS', 'zap', true),
-    );
-    return sections;
+  private savePinnedModels(): void {
+    void this.context?.globalState.update('pinnedModels', this.pinnedModels);
+    this.refresh();
   }
 
-  private getSectionChildren(sectionId: string): vscode.ProviderResult<AnyTreeItem[]> {
-    switch (sectionId) {
-      case 'favorites': return this.getFavoriteItems();
-      case 'providers': return this.getProviderItems();
-      case 'actions': return this.getActionItems();
-      default: return [];
-    }
+  private isActive(providerId: string, modelId: string): boolean {
+    return this.activeProviderId === providerId && this.activeModelId === modelId;
   }
+
+  // ── Favorites ──
 
   private getFavoriteItems(): ModelTreeItem[] {
     return this.pinnedModels.map((fav) => {
-      const descriptor = this.registry.get(fav.providerId as ProviderId);
       const item = new vscode.TreeItem(fav.name, vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
       item.modelId = fav.modelId;
       item.providerId = fav.providerId;
       item.contextValue = 'favorite-model';
-      const isSelected = this.activeProviderId === fav.providerId && this.activeModelId === fav.modelId;
-      item.description = `${descriptor?.displayName ?? fav.providerId} ${isSelected ? '✓ Active' : ''}`;
-      item.iconPath = new vscode.ThemeIcon('star-full', new vscode.ThemeColor('symbolIcon.keywordForeground'));
-      item.command = {
-        command: 'copilot-amplify.selectModel',
-        title: 'Use Model',
-        arguments: [item],
-      };
+      const providerName = this.registry.get(fav.providerId as ProviderId)?.displayName ?? fav.providerId;
+      item.description = this.isActive(fav.providerId, fav.modelId) ? `${providerName} · Selected` : providerName;
+      item.iconPath = new vscode.ThemeIcon('star-full', new vscode.ThemeColor('charts.yellow'));
+      item.tooltip = `${fav.name} (${providerName})`;
+      item.command = { command: 'copilot-amplify.selectModel', title: 'Select Model', arguments: [item] };
       return item;
     });
   }
 
-  // ── PROVIDERS section ───────────────────────────────────────────────────────
+  // ── Providers ──
 
   private async getProviderItems(): Promise<ProviderTreeItem[]> {
     const descriptors = this.registry.list();
-
-    // Populate key cache on first render (one IPC pass, then served synchronously).
     if (this.apiKeyCache.size === 0) {
-      const entries = await Promise.all(
-        descriptors.map(async (d) => [d.id, Boolean(await this.registry.auth(d.id).getApiKey())] as const),
-      );
-      for (const [id, hasKey] of entries) this.apiKeyCache.set(id, hasKey);
+      const keys = await Promise.all(descriptors.map((d) => this.registry.auth(d.id).getApiKey()));
+      descriptors.forEach((d, i) => this.apiKeyCache.set(d.id, Boolean(keys[i])));
     }
 
-    const healths = await Promise.all(
-      descriptors.map(async (d) => {
-        try {
-          return this.registry.provider(d.id).health();
-        } catch {
-          return undefined;
-        }
-      }),
-    );
-
-    return descriptors.map((descriptor, index) => {
-      const hasKey = this.apiKeyCache.get(descriptor.id) ?? false;
+    return descriptors.map((descriptor) => {
+      const provider = this.registry.provider(descriptor.id);
+      const health = provider.health();
       const isDynamic = descriptor.modelCountLabel === 'live';
-      // OmniRoute supports anonymous access — no key warning needed
-      const anonymousOk = descriptor.id === 'omniroute';
-      const health = healths[index];
-      const degraded = health !== undefined
-        && health.status !== 'connected'
-        && health.status !== 'not-configured'
-        && health.status !== 'setup-required';
-      const statusTxt = this.statusLabel(health, hasKey, anonymousOk);
+      const status = statusOf(health, this.apiKeyCache.get(descriptor.id) ?? false, descriptor.id === 'omniroute');
+      const models = isDynamic ? (health.status === 'connected' ? health.detail : 'Models not loaded') : `${descriptor.modelCountLabel} models`;
 
-      // For dynamic providers: show count when connected, "Not loaded" otherwise.
-      // Don't reuse health.detail when it's an error message (degraded) to avoid
-      // printing the same text twice in the description.
-      const countTxt = isDynamic
-        ? (degraded ? 'Not loaded' : (health?.detail ?? 'Not loaded'))
-        : `${descriptor.modelCountLabel} models`;
-
-      const healthyIcon = !degraded && (hasKey || anonymousOk);
-
-      // Collapsible: click arrow to browse models; inline buttons act on the row.
-      const item = new vscode.TreeItem(
-        descriptor.displayName,
-        vscode.TreeItemCollapsibleState.Collapsed,
-      ) as ProviderTreeItem;
-
-      // Warning badge: shown only when a key is actually required and missing.
-      // @ts-ignore TreeItemBadge not exported in current @types/vscode version; runtime supports it
-      item.badge = (hasKey || anonymousOk) ? undefined : {
-        value: '⚠',
-        tooltip: 'No API key — click the row to set one',
-      };
-
+      const item = new vscode.TreeItem(descriptor.displayName, vscode.TreeItemCollapsibleState.Collapsed) as ProviderTreeItem;
       item.providerId = descriptor.id;
       item.contextValue = descriptor.id === 'omniroute' ? 'omniroute-provider' : isDynamic ? 'dynamic-provider' : 'provider';
-      item.description = `${statusTxt}${health?.detail && degraded ? ` — ${health.detail}` : ''}  ·  ${countTxt}`;
-      item.iconPath = new vscode.ThemeIcon(
-        descriptor.treeIcon,
-        new vscode.ThemeColor(healthyIcon ? 'testing.iconPassed' : 'testing.iconFailed'),
-      );
-      item.tooltip = this.providerTooltip(descriptor.displayName, hasKey, descriptor.modelCountLabel, statusTxt, health?.detail);
+      item.description = status.ready && models ? `${status.text} · ${models}` : status.text;
+      item.iconPath = new vscode.ThemeIcon(descriptor.treeIcon, status.color ? new vscode.ThemeColor(status.color) : undefined);
+      item.tooltip = providerTooltip(descriptor, status, health, provider.getNetworkQuality());
       item.command = { command: 'copilot-amplify.provider.click', title: 'Open Provider', arguments: [item] };
       return item;
     });
   }
 
-  private statusLabel(health: ProviderHealth | undefined, hasKey: boolean, anonymousOk: boolean): string {
-    if (!health) {
-      return anonymousOk
-        ? (hasKey ? '✓ Ready (key set)' : '○ Ready (anonymous)')
-        : (hasKey ? '✓ Ready' : '⚠ No API key');
-    }
-    switch (health.status) {
-      case 'connected':      return anonymousOk && !hasKey ? '✓ Connected (anonymous)' : '✓ Connected';
-      case 'rate-limited':   return '⚠ Rate limited';
-      case 'auth-failed':    return '✗ Auth failed';
-      case 'error':          return '✗ Error';
-      case 'setup-required': return '⚠ No server URL';
-      case 'not-configured':
-      default:
-        return anonymousOk ? '○ Ready (anonymous)' : '⚠ No API key';
-    }
-  }
+  // ── Models ──
 
-  private providerTooltip(
-    brand: string,
-    hasKey: boolean,
-    modelCount: number | 'live',
-    statusTxt: string,
-    detail?: string,
-  ): vscode.MarkdownString {
-    const countMd = modelCount === 'live'
-      ? '**Models:** discovered at runtime (click ↓ to load)'
-      : `**Models:** ${modelCount} built-in`;
-    const detailMd = detail ? `\n**Detail:** ${detail}\n` : '\n';
-    const md = new vscode.MarkdownString(
-      `### ${brand}\n\n**Status:** ${statusTxt}\n${countMd}\n${detailMd}\nExpand to browse models. Right-click for key / connection actions.`,
-    );
-    md.isTrusted = true;
-    return md;
-  }
-
-  // ── Model rows (children of a provider item) ────────────────────────────────
-
-  private async getModelsForProvider(providerId: ProviderId): Promise<(ModelTreeItem | ActionTreeItem)[]> {
-    let models: ProviderTreeModel[];
-    try {
-      models = await this.registry.provider(providerId).listModelsForTree();
-    } catch {
-      models = [];
-    }
+  private async getModelItems(providerId: ProviderId): Promise<AnyTreeItem[]> {
     const descriptor = this.registry.get(providerId);
-    if (!descriptor) { return []; }
-
-    // Provider-specific management actions appended after models.
-    const providerActionItems: ActionTreeItem[] = providerId === 'omniroute'
-      ? OMNIROUTE_ACTIONS.map((a) => {
-          const item = new vscode.TreeItem(a.label, vscode.TreeItemCollapsibleState.None) as ActionTreeItem;
-          item.actionId = a.id;
-          item.contextValue = 'action';
-          item.iconPath = new vscode.ThemeIcon(a.icon);
-          item.tooltip = a.label;
-          item.command = { command: a.command, title: a.label };
-          return item;
-        })
-      : [];
-
-    if (models.length === 0) {
-      const isDynamic = descriptor.modelCountLabel === 'live';
-      const hasKey = this.apiKeyCache.get(providerId) ?? false;
-      const needsKey = providerId !== 'omniroute' && !hasKey;
-
-      let providerHealth: import('../core/provider/registry').ProviderHealth | undefined;
-      try { providerHealth = this.registry.provider(providerId).health(); } catch { /* not yet instantiated */ }
-      const needsUrl = providerHealth?.status === 'setup-required';
-
-      let hintText: string;
-      let hintIcon: string;
-      if (isDynamic) {
-        if (needsUrl) {
-          hintText = 'Set server URL first — click the row to configure';
-          hintIcon = 'warning';
-        } else if (needsKey) {
-          hintText = 'Set an API key first, then click ↓ Load Models';
-          hintIcon = 'warning';
-        } else {
-          hintText = 'No models loaded — click ↓ Load Models';
-          hintIcon = 'info';
-        }
-      } else {
-        hintText = 'No models available';
-        hintIcon = 'info';
-      }
-
-      const hint = new vscode.TreeItem(hintText, vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
-      hint.modelId = '';
-      hint.providerId = providerId;
-      hint.contextValue = 'model';
-      hint.iconPath = new vscode.ThemeIcon(hintIcon);
-      hint.description = '';
-      return [hint, ...providerActionItems];
+    if (!descriptor) {
+      return [];
     }
-
-    const modelItems = models.map((model) => {
-      const item = new vscode.TreeItem(model.name, vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
-      item.modelId = model.id;
-      item.providerId = providerId;
-      item.contextValue = 'model';
-
-      const isSelected = this.activeProviderId === providerId && this.activeModelId === model.id;
-      const isVision = Boolean(model.capabilities?.imageInput);
-      const isTools = Boolean(model.capabilities?.toolCalling);
-      const isReasoning = model.supportsReasoning === true;
-
-      const badges: string[] = [];
-      if (isVision) { badges.push('Vision'); }
-      if (isTools) { badges.push('Tools'); }
-      if (isReasoning) { badges.push('Reasoning'); }
-
-      item.iconPath = new vscode.ThemeIcon(
-        isSelected ? 'check' : isReasoning ? 'sparkle' : isVision ? 'eye' : 'symbol-method',
-        isSelected ? new vscode.ThemeColor('testing.iconPassed') : undefined,
-      );
-      item.description = badges.length > 0
-        ? `${model.id}  [${badges.join(', ')}]${isSelected ? '  ✓ Active' : ''}`
-        : `${model.id}${isSelected ? '  ✓ Active' : ''}`;
-
-      const limitsInfo = model.maxInputTokens
-        ? `\n\n**Max Input:** ${model.maxInputTokens.toLocaleString()} tokens\n**Max Output:** ${(model.maxOutputTokens || 8192).toLocaleString()} tokens`
-        : '';
-
-      item.tooltip = new vscode.MarkdownString(
-        `**${model.name}**\n\nModel ID: \`${model.id}\`\nProvider: ${descriptor.displayName}${badges.length > 0 ? `\nCapabilities: ${badges.join(', ')}` : ''}${limitsInfo}\n\nRight-click to pin this model.`,
-      );
-      item.command = {
-        command: 'copilot-amplify.selectModel',
-        title: 'Select Model',
-        arguments: [item],
-      };
-      return item;
-    });
-
-    return [...modelItems, ...providerActionItems];
+    const models = await this.registry.provider(providerId).listModelsForTree();
+    if (models.length === 0) {
+      return [this.hintFor(descriptor)];
+    }
+    return models.map((model) => this.modelItem(descriptor, model));
   }
 
-  // ── ACTIONS section ─────────────────────────────────────────────────────────
+  private modelItem(descriptor: AmplifyProviderDescriptor, model: ProviderTreeModel): ModelTreeItem {
+    const item = new vscode.TreeItem(model.name, vscode.TreeItemCollapsibleState.None) as ModelTreeItem;
+    item.modelId = model.id;
+    item.providerId = descriptor.id;
+    item.contextValue = 'model';
 
-  private getActionItems(): ActionTreeItem[] {
-    return ACTIONS.map((a) => {
-      const item = new vscode.TreeItem(a.label, vscode.TreeItemCollapsibleState.None) as ActionTreeItem;
-      item.actionId = a.id;
-      item.contextValue = 'action';
-      item.iconPath = new vscode.ThemeIcon(a.icon);
-      item.tooltip = a.label;
-      item.command = { command: a.command, title: a.label };
-      return item;
-    });
-  }
+    const features = [
+      model.capabilities?.imageInput && 'Vision',
+      model.capabilities?.toolCalling && 'Tools',
+      model.supportsReasoning && 'Reasoning',
+    ].filter((f): f is string => Boolean(f));
+    const selected = this.isActive(descriptor.id, model.id);
 
-  // ── Factory helpers ─────────────────────────────────────────────────────────
+    item.description = [selected ? 'Selected' : '', ...features].filter(Boolean).join(' · ');
+    item.iconPath = selected
+      ? new vscode.ThemeIcon('pass-filled', new vscode.ThemeColor('testing.iconPassed'))
+      : new vscode.ThemeIcon(model.supportsReasoning ? 'sparkle' : 'symbol-method');
 
-  private mkSection(sectionId: string, label: string, icon: string, collapsed: boolean): SectionTreeItem {
-    const item = new vscode.TreeItem(
-      label,
-      collapsed ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.Expanded,
-    ) as SectionTreeItem;
-    item.sectionId = sectionId;
-    item.contextValue = 'section';
-    item.iconPath = new vscode.ThemeIcon(icon);
+    const lines = [`**${model.name}**`, '', `Model ID: \`${model.id}\``, `Provider: ${descriptor.displayName}`];
+    if (features.length > 0) {
+      lines.push(`Features: ${features.join(', ')}`);
+    }
+    if (model.maxInputTokens) {
+      lines.push(`Context: ${formatTokens(model.maxInputTokens)} input · ${formatTokens(model.maxOutputTokens ?? 8192)} output`);
+    }
+    item.tooltip = new vscode.MarkdownString(lines.join('  \n'));
+    item.command = { command: 'copilot-amplify.selectModel', title: 'Select Model', arguments: [item] };
     return item;
   }
+
+  /** What the user should do next when a provider shows no models. Clicking the row does it. */
+  private hintFor(descriptor: AmplifyProviderDescriptor): HintTreeItem {
+    const target = { providerId: descriptor.id };
+    const needsUrl = this.registry.provider(descriptor.id).health().status === 'setup-required';
+    const needsKey = descriptor.id !== 'omniroute' && !this.apiKeyCache.get(descriptor.id);
+
+    const [label, icon, command]: [string, string, vscode.Command | undefined] =
+      needsUrl ? ['Set the server URL to get started', 'link', { command: 'copilot-amplify.CA-omniroute.editBaseUrl', title: '' }]
+      : needsKey ? ['Add an API key to get started', 'key', { command: 'copilot-amplify.setApiKey', title: '', arguments: [target] }]
+      : descriptor.modelCountLabel === 'live' ? ['Load models from the server', 'cloud-download', { command: 'copilot-amplify.loadModels', title: '', arguments: [target] }]
+      : ['No models available', 'info', undefined];
+
+    const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None) as HintTreeItem;
+    item.contextValue = 'hint';
+    item.iconPath = new vscode.ThemeIcon(icon);
+    item.command = command;
+    return item;
+  }
+}
+
+function section(sectionId: SectionTreeItem['sectionId'], label: string, icon: string): SectionTreeItem {
+  const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.Expanded) as SectionTreeItem;
+  item.sectionId = sectionId;
+  item.contextValue = 'section';
+  item.iconPath = new vscode.ThemeIcon(icon);
+  return item;
+}
+
+function statusOf(health: ProviderHealth, hasKey: boolean, keyOptional: boolean): Status {
+  switch (health.status) {
+    case 'connected':
+      return { text: 'Connected', color: 'testing.iconPassed', ready: true };
+    case 'rate-limited':
+      return { text: 'Rate limited', color: 'list.warningForeground', ready: true };
+    case 'auth-failed':
+      return { text: 'API key rejected', color: 'list.errorForeground', ready: false };
+    case 'error':
+      return { text: 'Connection problem', color: 'list.errorForeground', ready: false };
+    case 'setup-required':
+      return { text: 'Server URL needed', color: 'list.warningForeground', ready: false };
+    case 'not-configured':
+      // Nothing sent or tested yet: readiness depends only on the key.
+      return hasKey || keyOptional
+        ? { text: 'Ready', ready: true }
+        : { text: 'API key needed', color: 'list.warningForeground', ready: false };
+  }
+}
+
+function providerTooltip(
+  descriptor: AmplifyProviderDescriptor,
+  status: Status,
+  health: ProviderHealth,
+  quality: NetworkQuality,
+): vscode.MarkdownString {
+  const lines = [`**${descriptor.displayName}**`, '', `Status: ${status.text}`];
+  lines.push(descriptor.modelCountLabel === 'live' ? 'Models: loaded from the server' : `Models: ${descriptor.modelCountLabel} built in`);
+  if (health.detail && !status.ready) {
+    lines.push(`Details: ${health.detail}`);
+  }
+  if (quality.sampleCount > 0) {
+    lines.push(
+      `Network: ${quality.avgLatencyMs} ms to first token · ${Math.round(quality.errorRate * 100)}% errors (last ${quality.sampleCount} requests)`,
+    );
+  }
+  lines.push('', 'Expand to see models. Right-click for more actions.');
+  return new vscode.MarkdownString(lines.join('  \n'));
+}
+
+/** 128000 → "128K", 1048576 → "1M". */
+function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    return `${+(tokens / 1_000_000).toFixed(1)}M`;
+  }
+  return tokens >= 1_000 ? `${Math.round(tokens / 1_000)}K` : String(tokens);
 }

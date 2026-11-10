@@ -1,26 +1,13 @@
 /**
- * AgentRouter catalog builder.
+ * Turns discovered AgentRouter models into Copilot Chat picker entries.
  *
- * Converts the normalized model map produced by {@link fetchAgentrouterPricing}
- * into `vscode.LanguageModelChatInformation[]` entries that the Copilot Chat
- * picker can render.
- *
- * Token limits and capability defaults are seeded from a small `KNOWN_*`
- * table for the well-known Claude Opus 4 variants the user explicitly
- * named, and otherwise fall back to safe defaults. The AgentRouter server
- * does not currently advertise `max_input_tokens` / `max_output_tokens` /
- * `capabilities` in the `/api/pricing` payload, so we do not derive them
- * from discovery.
+ * `/api/pricing` does not report token limits or capabilities, so those come
+ * from the `KNOWN_*` tables below, with conservative defaults for the rest.
  */
 
-import type * as vscode from 'vscode';
-import { AGENTROUTER_CLAUDE_THINKING_CONFIGURATION } from '../../core/models/catalog';
+import { AGENTROUTER_CLAUDE_THINKING_CONFIGURATION, type ConfigurableLanguageModelChatInformation } from '../../core/models/catalog';
 import type { DiscoveredAgentrouterModel, AgentrouterEndpointType } from './discovery';
 import { AGENTROUTER_DISPLAY_NAME } from './descriptor';
-
-interface ConfigurableLanguageModelChatInformation extends vscode.LanguageModelChatInformation {
-  configurationSchema?: typeof AGENTROUTER_CLAUDE_THINKING_CONFIGURATION;
-}
 
 interface ModelDefaults {
   maxInputTokens: number;
@@ -36,11 +23,7 @@ const DEFAULT_FALLBACK: ModelDefaults = {
   toolCalling: true,
 };
 
-/**
- * Seeded defaults for the Claude Opus 4 line (Anthropic's public specs).
- * Only the variants the user explicitly named get hand-tuned entries;
- * everything else falls through to the safe defaults.
- */
+/** Claude Opus 4.x limits, from Anthropic's published specs. */
 const KNOWN_CLAUDE_DEFAULTS: Record<string, ModelDefaults> = {
   'claude-opus-4-6': {
     maxInputTokens: 200_000,
@@ -205,7 +188,7 @@ function buildInformation(
 ): ConfigurableLanguageModelChatInformation {
   const defaults = resolveDefaults(model.id);
   const transport = resolveAgentrouterTransport(model);
-  const transportLabel = transport === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible';
+  const transportLabel = transport === 'anthropic' ? 'Anthropic API' : 'OpenAI-compatible API';
   // Surface the discovered `supported_endpoint_types` so the user can see
   // exactly what the server declared for this model — useful when a model
   // is wired up to a single endpoint (so a future addition to the server
@@ -218,7 +201,7 @@ function buildInformation(
     name: agentrouterDisplayName(model.id),
     family: 'agentrouter',
     version: model.id,
-    tooltip: `${AGENTROUTER_DISPLAY_NAME} · ${transportLabel} (server: ${declaredTypes})`,
+    tooltip: `${AGENTROUTER_DISPLAY_NAME} · ${transportLabel} (server advertises: ${declaredTypes})`,
     detail: `${AGENTROUTER_DISPLAY_NAME} · ${transportLabel}`,
     maxInputTokens: defaults.maxInputTokens,
     maxOutputTokens: defaults.maxOutputTokens,

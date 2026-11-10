@@ -16,7 +16,8 @@
 
 import * as vscode from 'vscode';
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions/completions';
-import { ApiError, customFetch, streamingChatFetch } from './client';
+import { ApiError, streamingChatFetch } from './client';
+import { apiErrorFromResponse, createRequestSignal, errorMessageFromBody, toApiError } from './http';
 import { joinEndpoint } from '../url';
 import { parseSseStream } from './sse';
 
@@ -142,10 +143,6 @@ export class AnthropicApiClient {
     this.fetchImpl = options.fetchImpl ?? streamingChatFetch;
   }
 
-  private getEndpoint(path: string): string {
-    return joinEndpoint(this.baseURL, path);
-  }
-
   private buildHeaders(): Record<string, string> {
     return {
       'content-type': 'application/json',
@@ -193,31 +190,14 @@ export class AnthropicApiClient {
     return body;
   }
 
-  private toApiError(status: number, body: unknown, headers?: Record<string, string>): ApiError {
-    let detail = '';
-    if (body && typeof body === 'object') {
-      const error = (body as { error?: { message?: unknown; type?: unknown } }).error;
-      if (error && typeof error.message === 'string') {
-        detail = error.message;
-      } else if (body && typeof body === 'object' && 'message' in body && typeof (body as { message: unknown }).message === 'string') {
-        detail = (body as { message: string }).message;
-      }
-    }
-    return new ApiError(
-      `${this.providerName} API error: ${status}${detail ? ` ${detail}` : ''}`,
-      status,
-      body,
-      headers,
-    );
+  private get errorLabel(): string {
+    return `${this.providerName} API error`;
   }
 
   /**
-   * Stream a chat completion from the Anthropic `messages` API.
-   *
-   * Yields OpenAI-shaped `ChatCompletionChunk` values for text, reasoning
-   * (`reasoning_content` field on the delta), and tool-call deltas so the
-   * shared `BaseChatProvider.streamResponse` pipeline can consume them
-   * without any Anthropic-specific awareness.
+   * Stream a chat completion from the Anthropic `messages` API, translated
+   * into OpenAI-shaped chunks so `BaseChatProvider.consumeChatStream` can
+   * handle both transports the same way.
    */
   async *streamChat(
     model: string,
@@ -226,330 +206,111 @@ export class AnthropicApiClient {
     options?: AnthropicStreamOptions,
     cancellationToken?: vscode.CancellationToken,
   ): AsyncGenerator<ChatCompletionChunk> {
-    const abortController = new AbortController();
-    const timer = setTimeout(() => abortController.abort(), this.timeoutMs);
-    timer.unref?.();
-    const cancellationDisposable = cancellationToken?.onCancellationRequested(() =>
-      abortController.abort(),
-    );
-
+    const request = createRequestSignal({ timeoutMs: this.timeoutMs, token: cancellationToken });
     try {
-      const response = await this.fetchImpl(this.getEndpoint('/v1/messages'), {
+      const response = await this.fetchImpl(joinEndpoint(this.baseURL, '/v1/messages'), {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(this.buildBody(model, system, messages, options)),
-        signal: abortController.signal,
+        signal: request.signal,
       });
-
       if (!response.ok) {
-        let body: unknown;
-        try {
-          body = await response.json();
-        } catch {
-          body = undefined;
-        }
-        const responseHeaders: Record<string, string> = {};
-        response.headers.forEach((value, key) => {
-          responseHeaders[key.toLowerCase()] = value;
-        });
-        throw this.toApiError(response.status, body, responseHeaders);
+        throw await apiErrorFromResponse(response, this.errorLabel);
       }
-
       if (!response.body) {
-        throw new ApiError(`${this.providerName} API error: empty response body`, 0);
+        throw new ApiError(`${this.errorLabel}: empty response body`, 0);
       }
-
       yield* this.streamChunks(response.body, model, cancellationToken);
     } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
+      // shortcut: a timeout also lands here and ends the stream silently, like a user cancel.
       if (error instanceof Error && error.name === 'AbortError') {
         return;
       }
-      throw new ApiError(
-        `${this.providerName} API error: ${error instanceof Error ? error.message : String(error)}`,
-        0,
-      );
+      throw toApiError(error, this.errorLabel);
     } finally {
-      clearTimeout(timer);
-      cancellationDisposable?.dispose();
+      request.dispose();
     }
   }
 
-  /**
-   * Parse an Anthropic SSE response and yield OpenAI-shaped chunks.
-   * Exposed for unit tests.
-   */
+  /** Translate Anthropic SSE events into OpenAI-shaped chunks. Public for tests. */
   async *streamChunks(
     body: ReadableStream<Uint8Array>,
     model: string,
     cancellationToken?: vscode.CancellationToken,
   ): AsyncGenerator<ChatCompletionChunk> {
-    // Track tool-use state: by index, the current id, name, and accumulated JSON.
-    const toolUseIndexByBlockIndex = new Map<number, number>();
-    const nextToolCallIndex = (() => {
-      let next = 0;
-      return () => {
-        const v = next;
-        next += 1;
-        return v;
-      };
-    })();
+    const chunk = (
+      delta: ChatCompletionChunk.Choice.Delta,
+      finishReason: ChatCompletionChunk.Choice['finish_reason'] = null,
+    ): ChatCompletionChunk => ({
+      id: 'anthropic',
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{ index: 0, delta, finish_reason: finishReason }],
+    });
+
+    // Anthropic numbers content blocks (text, thinking, tool_use together);
+    // OpenAI numbers tool calls only. Map one onto the other.
+    const toolCallIndexByBlock = new Map<number, number>();
 
     for await (const event of parseSseStream(body)) {
       if (cancellationToken?.isCancellationRequested) {
-        try {
-          await body.cancel();
-        } catch {
-          /* best-effort */
-        }
+        await body.cancel().catch(() => {});
         return;
       }
+      const blockIndex = typeof event['index'] === 'number' ? event['index'] : 0;
 
-      const type = event['type'];
-      if (typeof type !== 'string') {
-        continue;
-      }
-
-      if (type === 'message_start') {
-        // Initial message metadata; no payload to emit but useful as a marker.
-        continue;
-      }
-
-      if (type === 'content_block_start') {
-        const block = event['content_block'] as { type?: string; id?: string; name?: string } | undefined;
-        if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') {
-          const blockIndex = typeof event['index'] === 'number' ? (event['index'] as number) : 0;
-          const toolCallIndex = nextToolCallIndex();
-          toolUseIndexByBlockIndex.set(blockIndex, toolCallIndex);
-          yield {
-            id: 'anthropic',
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: {
-                  tool_calls: [
-                    {
-                      index: toolCallIndex,
-                      id: block.id,
-                      type: 'function',
-                      function: { name: block.name, arguments: '' },
-                    },
-                  ],
-                },
-                finish_reason: null,
-              },
-            ],
-          };
-        }
-        continue;
-      }
-
-      if (type === 'content_block_delta') {
-        const delta = event['delta'] as { type?: string; text?: string; thinking?: string; partial_json?: string } | undefined;
-        const blockIndex = typeof event['index'] === 'number' ? (event['index'] as number) : 0;
-        if (!delta) {
-          continue;
-        }
-        if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text.length > 0) {
-          yield {
-            id: 'anthropic',
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: { content: delta.text },
-                finish_reason: null,
-              },
-            ],
-          };
-          continue;
-        }
-        if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking.length > 0) {
-          // `reasoning_content` is not part of the OpenAI Delta type but
-          // the shared streaming pipeline reads it as a generic reasoning
-          // field (alongside `reasoning`, `thought`, `thinking`, etc.).
-          // Cast through `unknown` so we can attach the synthetic field
-          // without losing the surrounding chunk structure.
-          yield {
-            id: 'anthropic',
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: { reasoning_content: delta.thinking } as unknown as ChatCompletionChunk.Choice.Delta,
-                finish_reason: null,
-              },
-            ],
-          };
-          continue;
-        }
-        if (delta.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
-          const toolCallIndex = toolUseIndexByBlockIndex.get(blockIndex);
-          if (toolCallIndex === undefined) {
-            continue;
+      switch (event['type']) {
+        case 'content_block_start': {
+          const block = event['content_block'] as { type?: string; id?: string; name?: string } | undefined;
+          if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') {
+            const toolCallIndex = toolCallIndexByBlock.size;
+            toolCallIndexByBlock.set(blockIndex, toolCallIndex);
+            yield chunk({
+              tool_calls: [{ index: toolCallIndex, id: block.id, type: 'function', function: { name: block.name, arguments: '' } }],
+            });
           }
-          yield {
-            id: 'anthropic',
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: {
-                  tool_calls: [
-                    {
-                      index: toolCallIndex,
-                      function: { arguments: delta.partial_json },
-                    },
-                  ],
-                },
-                finish_reason: null,
-              },
-            ],
-          };
+          break;
         }
-        continue;
-      }
 
-      if (type === 'content_block_stop') {
-        continue;
-      }
-
-      if (type === 'message_delta') {
-        const stopReason = (event['delta'] as { stop_reason?: unknown } | undefined)?.stop_reason;
-        if (stopReason === 'end_turn' || stopReason === 'stop_sequence' || stopReason === 'max_tokens') {
-          yield {
-            id: 'anthropic',
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: {},
-                finish_reason: 'stop',
-              },
-            ],
-          };
-        } else if (stopReason === 'tool_use') {
-          yield {
-            id: 'anthropic',
-            object: 'chat.completion.chunk',
-            created: Math.floor(Date.now() / 1000),
-            model,
-            choices: [
-              {
-                index: 0,
-                delta: {},
-                finish_reason: 'tool_calls',
-              },
-            ],
-          };
+        case 'content_block_delta': {
+          const delta = event['delta'] as { type?: string; text?: string; thinking?: string; partial_json?: string } | undefined;
+          if (delta?.type === 'text_delta' && delta.text) {
+            yield chunk({ content: delta.text });
+          } else if (delta?.type === 'thinking_delta' && delta.thinking) {
+            // `reasoning_content` is not in the OpenAI delta type, but it is the
+            // field consumeChatStream reads reasoning from.
+            yield chunk({ reasoning_content: delta.thinking } as ChatCompletionChunk.Choice.Delta);
+          } else if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+            const toolCallIndex = toolCallIndexByBlock.get(blockIndex);
+            if (toolCallIndex !== undefined) {
+              yield chunk({ tool_calls: [{ index: toolCallIndex, function: { arguments: delta.partial_json } }] });
+            }
+          }
+          break;
         }
-        continue;
-      }
 
-      if (type === 'message_stop') {
-        yield {
-          id: 'anthropic',
-          object: 'chat.completion.chunk',
-          created: Math.floor(Date.now() / 1000),
-          model,
-          choices: [
-            {
-              index: 0,
-              delta: {},
-              finish_reason: 'stop',
-            },
-          ],
-        };
-        return;
-      }
-
-      if (type === 'error') {
-        const errBody = event['error'] as { message?: unknown; type?: unknown } | undefined;
-        const message = errBody && typeof errBody.message === 'string' ? errBody.message : 'Anthropic stream error';
-        throw new ApiError(`${this.providerName} API error: ${message}`, 0, event);
-      }
-
-      if (type === 'ping') {
-        // Keep-alive; ignore.
-        continue;
-      }
-    }
-  }
-
-  /**
-   * Non-streaming probe — used for connection tests. Returns the first
-   * assistant text content if present, otherwise an empty string.
-   */
-  async chatNonStreaming(
-    model: string,
-    system: string | undefined,
-    messages: AnthropicMessageParam[],
-    options?: AnthropicStreamOptions,
-  ): Promise<string> {
-    const abortController = new AbortController();
-    const timer = setTimeout(() => abortController.abort(), this.timeoutMs);
-    timer.unref?.();
-
-    try {
-      const response = await customFetch(this.getEndpoint('/v1/messages'), {
-        method: 'POST',
-        headers: { ...this.buildHeaders(), accept: 'application/json' },
-        body: JSON.stringify(this.buildBody(model, system, messages, { ...(options ?? {}), maxTokens: options?.maxTokens ?? 1 })),
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) {
-        let body: unknown;
-        try {
-          body = await response.json();
-        } catch {
-          body = undefined;
+        case 'message_delta': {
+          const stopReason = (event['delta'] as { stop_reason?: unknown } | undefined)?.stop_reason;
+          if (stopReason === 'tool_use') {
+            yield chunk({}, 'tool_calls');
+          } else if (stopReason === 'end_turn' || stopReason === 'stop_sequence' || stopReason === 'max_tokens') {
+            yield chunk({}, 'stop');
+          }
+          break;
         }
-        const responseHeaders: Record<string, string> = {};
-        response.headers.forEach((value, key) => {
-          responseHeaders[key.toLowerCase()] = value;
-        });
-        throw this.toApiError(response.status, body, responseHeaders);
-      }
 
-      const json = (await response.json()) as {
-        content?: Array<{ type?: string; text?: unknown }>;
-      };
-      if (!Array.isArray(json.content)) {
-        return '';
-      }
-      for (const block of json.content) {
-        if (block && block.type === 'text' && typeof block.text === 'string') {
-          return block.text;
+        case 'message_stop':
+          yield chunk({}, 'stop');
+          return;
+
+        case 'error': {
+          const message = errorMessageFromBody(event) || 'Anthropic stream error';
+          throw new ApiError(`${this.errorLabel}: ${message}`, 0, event);
         }
+
+        // message_start, content_block_stop and ping carry nothing we need.
       }
-      return '';
-    } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      if (error instanceof Error && error.name === 'AbortError') {
-        return '';
-      }
-      throw new ApiError(
-        `${this.providerName} API error: ${error instanceof Error ? error.message : String(error)}`,
-        0,
-      );
-    } finally {
-      clearTimeout(timer);
     }
   }
 }

@@ -49,18 +49,11 @@ export function parseToolArguments(argumentsText: string): Record<string, unknow
     cleaned = cleaned.replace(MARKDOWN_FENCE_START, '').replace(MARKDOWN_FENCE_END, '').trim();
   }
 
+  // safeParse returns null for malformed JSON *and* for __proto__/constructor
+  // payloads; never fall back to plain JSON.parse or the guard is bypassed.
   const parsed = secureJsonParse.safeParse(cleaned);
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     return parsed as Record<string, unknown>;
-  }
-
-  try {
-    const raw = JSON.parse(cleaned);
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-      return raw as Record<string, unknown>;
-    }
-  } catch {
-    /* ignore parse errors */
   }
 
   return {};

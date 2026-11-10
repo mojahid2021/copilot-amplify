@@ -1,6 +1,6 @@
 {
   "name": "copilot-amplify",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "displayName": "Copilot Amplify",
   "description": "Extend GitHub Copilot Chat with additional AI model providers",
   "author": "Md Mojahid",
@@ -38,141 +38,182 @@
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "configuration": {
-      "title": "Copilot Amplify",
-      "type": "object",
-      "properties": {
-        "copilot-amplify.customSystemPrompt": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Custom system prompt or guardrail instructions to inject into chat requests across all providers."
-        },
-        "copilot-amplify.enableReasoning": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Globally enable reasoning capabilities for supported models (e.g. DeepSeek-R1, QwQ). This applies to both the Chat panel and native Copilot Chat."
-        },
-        "copilot-amplify.requestTimeoutMs": {
-          "type": "number",
-          "default": 120000,
-          "minimum": 1000,
-          "markdownDescription": "Chat request timeout in milliseconds for fixed-catalog providers (Xiaomi MiMo, Z.ai, Groq, NVIDIA NIM). Prevents hung requests from blocking for minutes."
-        },
-        "copilot-amplify.CA-omniroute.baseUrl": {
-          "type": "string",
-          "default": "http://localhost:20128/v1",
-          "markdownDescription": "Base URL of the OmniRoute server. **Must include the `/v1` path** (e.g. `http://localhost:20128/v1` or `https://omniroute.example.com/v1`). The chat-completions endpoint is permanently fixed at `{baseUrl}/chat/completions`. Change this if you run OmniRoute on a different host/port."
-        },
-        "copilot-amplify.CA-omniroute.noCache": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Send `X-OmniRoute-No-Cache: true` to bypass the semantic cache for every request. Defaults to `false` (caching enabled, so repeated requests hit the cache and cost nothing)."
-        },
-        "copilot-amplify.CA-omniroute.noMemory": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Send `x-omniroute-no-memory: true` to skip memory + skills injection for every request, avoiding the per-call token/cost overhead. Set to `false` if you want OmniRoute memory and skills to be injected (requires a stable `sessionId` to be useful)."
-        },
-        "copilot-amplify.CA-omniroute.compression": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Per-request compression override sent via `x-omniroute-compression`. Values: `off`, `default`, `engine:<id>` (e.g. `engine:rtk`), or a named combo id. Leave empty to let OmniRoute pick."
-        },
-        "copilot-amplify.CA-omniroute.sessionId": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Caller-supplied session/conversation tag sent via `X-OmniRoute-Session-Id`. It is persisted to `call_logs.session_tag` for per-session cost attribution and feeds memory. Leave empty to let the extension generate one per chat conversation."
-        },
-        "copilot-amplify.CA-omniroute.progress": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Send `X-OmniRoute-Progress: true` to opt into progress events from the server."
-        },
-        "copilot-amplify.CA-omniroute.modelCacheTtlSeconds": {
-          "type": "number",
-          "default": 300,
-          "minimum": 10,
-          "markdownDescription": "How long (in seconds) the discovered model list stays cached before refetching `GET /v1/models`."
-        },
-        "copilot-amplify.CA-omniroute.requestTimeoutMs": {
-          "type": "number",
-          "default": 120000,
-          "minimum": 1000,
-          "markdownDescription": "Chat request timeout in milliseconds (covers connection + full stream)."
-        },
-        "copilot-amplify.CA-omniroute.discoveryTimeoutMs": {
-          "type": "number",
-          "default": 8000,
-          "minimum": 500,
-          "markdownDescription": "Model discovery / connection-test timeout in milliseconds."
-        },
-        "copilot-amplify.CA-omniroute.warmupOnStartup": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Discover OmniRoute models when the extension activates instead of on first use. Off by default to keep activation lightweight."
-        },
-        "copilot-amplify.CA-omniroute.debugLogging": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable debug-level logging for OmniRoute in the Copilot Amplify output channel."
-        },
-        "copilot-amplify.CA-agentrouter.baseUrl": {
-          "type": "string",
-          "default": "https://agentrouter.org/v1",
-          "markdownDescription": "OpenAI-compatible base URL of the AgentRouter gateway. **Must include the `/v1` path** (e.g. `https://agentrouter.org/v1`). Used for all non-Anthropic models (GPT, GLM, DeepSeek, etc.). Claude models use the Anthropic-native endpoint derived from this URL by stripping `/v1`."
-        },
-        "copilot-amplify.CA-agentrouter.discoveryTimeoutMs": {
-          "type": "number",
-          "default": 8000,
-          "minimum": 500,
-          "markdownDescription": "Catalog discovery / connection-test timeout in milliseconds. The provider fetches `GET {baseUrl}/api/pricing` to enumerate models and to validate credentials."
-        },
-        "copilot-amplify.CA-agentrouter.requestTimeoutMs": {
-          "type": "number",
-          "default": 120000,
-          "minimum": 1000,
-          "markdownDescription": "Chat request timeout in milliseconds (covers connection + full stream) for both the Anthropic and OpenAI-compatible transports."
-        },
-        "copilot-amplify.CA-agentrouter.cacheTtlSeconds": {
-          "type": "number",
-          "default": 300,
-          "minimum": 10,
-          "markdownDescription": "How long the discovered model list stays cached before refetching `GET {baseUrl}/api/pricing`."
-        },
-        "copilot-amplify.CA-agentrouter.warmupOnStartup": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Discover CA-AgentRouter models when the extension activates instead of on first use. Off by default to keep activation lightweight."
-        },
-        "copilot-amplify.circuitBreaker.enabled": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Temporarily stop sending requests to a provider after repeated consecutive failures, retrying after a cooldown."
-        },
-        "copilot-amplify.circuitBreaker.failureThreshold": {
-          "type": "number",
-          "default": 5,
-          "minimum": 1,
-          "markdownDescription": "Consecutive failures before a provider's circuit opens."
-        },
-        "copilot-amplify.circuitBreaker.resetTimeoutSeconds": {
-          "type": "number",
-          "default": 30,
-          "minimum": 5,
-          "markdownDescription": "Cooldown (seconds) before a single probe request is allowed through an open circuit."
-        },
-        "copilot-amplify.debugLogging": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Enable debug-level logging in the Copilot Amplify output channel."
-        },
-        "copilot-amplify.CA-omniroute.logTelemetry": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Log OmniRoute response telemetry (routing decision, provider, latency, tokens, cost, cache hit/cost-saved) to the `Omniroute` output channel. Open it with the `Copilot Amplify: Show Omniroute Telemetry` command."
+    "configuration": [
+      {
+        "title": "General",
+        "properties": {
+          "copilot-amplify.customSystemPrompt": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Extra instructions added in front of the system prompt for every request, on every provider. Leave empty to send Copilot's prompt unchanged.",
+            "order": 1,
+            "editPresentation": "multilineText"
+          },
+          "copilot-amplify.enableReasoning": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Let models that support it think before answering (for example Kimi K3, GLM, Claude). Turn off for faster, cheaper replies.",
+            "order": 2
+          },
+          "copilot-amplify.requestTimeoutMs": {
+            "type": "number",
+            "default": 120000,
+            "minimum": 1000,
+            "markdownDescription": "How long to wait for a reply, in milliseconds, before giving up. Applies to Xiaomi MiMo, Z.ai, Groq and NVIDIA NIM.",
+            "order": 3
+          },
+          "copilot-amplify.debugLogging": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Write detailed logs to the **Copilot Amplify** output channel. Useful when reporting a problem; API keys are never logged.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "title": "Reliability",
+        "properties": {
+          "copilot-amplify.circuitBreaker.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "After several failed requests in a row, pause requests to that provider for a short cooldown instead of failing slowly each time.",
+            "order": 1
+          },
+          "copilot-amplify.circuitBreaker.failureThreshold": {
+            "type": "number",
+            "default": 5,
+            "minimum": 1,
+            "markdownDescription": "Number of failed requests in a row that pauses a provider.",
+            "order": 2
+          },
+          "copilot-amplify.circuitBreaker.resetTimeoutSeconds": {
+            "type": "number",
+            "default": 30,
+            "minimum": 5,
+            "markdownDescription": "How long a paused provider waits, in seconds, before one request is allowed through to check whether it has recovered.",
+            "order": 3
+          }
+        }
+      },
+      {
+        "title": "OmniRoute",
+        "properties": {
+          "copilot-amplify.CA-omniroute.baseUrl": {
+            "type": "string",
+            "default": "http://localhost:20128/v1",
+            "markdownDescription": "Address of your OmniRoute server, including the `/v1` path, for example `http://localhost:20128/v1`. Models load only after this is set.",
+            "order": 1
+          },
+          "copilot-amplify.CA-omniroute.requestTimeoutMs": {
+            "type": "number",
+            "default": 120000,
+            "minimum": 1000,
+            "markdownDescription": "How long to wait for a reply, in milliseconds, including the whole streamed answer.",
+            "order": 2
+          },
+          "copilot-amplify.CA-omniroute.discoveryTimeoutMs": {
+            "type": "number",
+            "default": 8000,
+            "minimum": 500,
+            "markdownDescription": "How long to wait, in milliseconds, when loading models or testing the connection.",
+            "order": 3
+          },
+          "copilot-amplify.CA-omniroute.modelCacheTtlSeconds": {
+            "type": "number",
+            "default": 300,
+            "minimum": 10,
+            "markdownDescription": "How long, in seconds, a loaded model list counts as up to date. The list stays usable after it expires.",
+            "order": 4
+          },
+          "copilot-amplify.CA-omniroute.warmupOnStartup": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Load OmniRoute models automatically when VS Code starts. When off, models load only when you select **Load Models**.",
+            "order": 5
+          },
+          "copilot-amplify.CA-omniroute.noCache": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Skip OmniRoute's response cache (sends `X-OmniRoute-No-Cache`). Leave off so repeated requests are answered from the cache at no cost.",
+            "order": 6
+          },
+          "copilot-amplify.CA-omniroute.noMemory": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Don't add OmniRoute memory and skills to requests (sends `x-omniroute-no-memory`), which avoids their extra token cost.",
+            "order": 7
+          },
+          "copilot-amplify.CA-omniroute.compression": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Compression mode for requests: `off`, `default`, `engine:<id>` (for example `engine:rtk`) or a combo id. Leave empty to let the server decide.",
+            "order": 8
+          },
+          "copilot-amplify.CA-omniroute.sessionId": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Session tag for cost tracking and memory (sent as `X-OmniRoute-Session-Id`). Leave empty to use one generated per VS Code window.",
+            "order": 9
+          },
+          "copilot-amplify.CA-omniroute.progress": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Ask the server for progress events while it routes a request (sends `X-OmniRoute-Progress`).",
+            "order": 10
+          },
+          "copilot-amplify.CA-omniroute.logTelemetry": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Log each response's route, model, latency, tokens and cost to the **Copilot Amplify** output channel.",
+            "order": 11
+          },
+          "copilot-amplify.CA-omniroute.debugLogging": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Write detailed OmniRoute logs to the **Copilot Amplify** output channel.",
+            "order": 12
+          }
+        }
+      },
+      {
+        "title": "AgentRouter",
+        "properties": {
+          "copilot-amplify.CA-agentrouter.baseUrl": {
+            "type": "string",
+            "default": "https://agentrouter.org/v1",
+            "markdownDescription": "AgentRouter address, including the `/v1` path. Claude models use the same address without `/v1`.",
+            "order": 1
+          },
+          "copilot-amplify.CA-agentrouter.requestTimeoutMs": {
+            "type": "number",
+            "default": 120000,
+            "minimum": 1000,
+            "markdownDescription": "How long to wait for a reply, in milliseconds, including the whole streamed answer.",
+            "order": 2
+          },
+          "copilot-amplify.CA-agentrouter.discoveryTimeoutMs": {
+            "type": "number",
+            "default": 8000,
+            "minimum": 500,
+            "markdownDescription": "How long to wait, in milliseconds, when loading models or testing the connection.",
+            "order": 3
+          },
+          "copilot-amplify.CA-agentrouter.cacheTtlSeconds": {
+            "type": "number",
+            "default": 300,
+            "minimum": 10,
+            "markdownDescription": "How long, in seconds, a loaded model list counts as up to date. The list stays usable after it expires.",
+            "order": 4
+          },
+          "copilot-amplify.CA-agentrouter.warmupOnStartup": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Load AgentRouter models automatically when VS Code starts. When off, models load only when you select **Load Models**.",
+            "order": 5
+          }
         }
       }
-    },
+    ],
     "viewsContainers": {
       "activitybar": [
         {
@@ -193,73 +234,105 @@
       ]
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "copilot-amplify.loadModels",
+          "when": "false"
+        },
+        {
+          "command": "copilot-amplify.selectModel",
+          "when": "false"
+        },
+        {
+          "command": "copilot-amplify.pinModel",
+          "when": "false"
+        },
+        {
+          "command": "copilot-amplify.unpinModel",
+          "when": "false"
+        },
+        {
+          "command": "copilot-amplify.provider.click",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "copilot-amplify.refresh",
           "when": "view == copilot-amplify.providers",
-          "group": "0_copilot-amplify/navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "copilot-amplify.manage",
+          "when": "view == copilot-amplify.providers",
+          "group": "navigation@2"
+        },
+        {
+          "command": "copilot-amplify.showDiagnostics",
+          "when": "view == copilot-amplify.providers",
+          "group": "1_tools@1"
+        },
+        {
+          "command": "copilot-amplify.showNetworkQuality",
+          "when": "view == copilot-amplify.providers",
+          "group": "1_tools@2"
+        },
+        {
+          "command": "copilot-amplify.documentation",
+          "when": "view == copilot-amplify.providers",
+          "group": "2_help@1"
+        },
+        {
+          "command": "copilot-amplify.report",
+          "when": "view == copilot-amplify.providers",
+          "group": "2_help@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "copilot-amplify.setApiKey",
-          "when": "view == copilot-amplify.providers && viewItem == 'provider'",
-          "group": "inline@1"
-        },
-        {
           "command": "copilot-amplify.testConnection",
           "when": "view == copilot-amplify.providers && viewItem == 'provider'",
-          "group": "inline@2"
-        },
-        {
-          "command": "copilot-amplify.clearApiKey",
-          "when": "view == copilot-amplify.providers && viewItem == 'provider'",
-          "group": "inline@3"
+          "group": "inline@1"
         },
         {
           "command": "copilot-amplify.loadModels",
-          "when": "view == copilot-amplify.providers && viewItem == 'dynamic-provider'",
+          "when": "view == copilot-amplify.providers && (viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
           "group": "inline@1"
-        },
-        {
-          "command": "copilot-amplify.setApiKey",
-          "when": "view == copilot-amplify.providers && viewItem == 'dynamic-provider'",
-          "group": "inline@2"
-        },
-        {
-          "command": "copilot-amplify.testConnection",
-          "when": "view == copilot-amplify.providers && viewItem == 'dynamic-provider'",
-          "group": "inline@3"
-        },
-        {
-          "command": "copilot-amplify.clearApiKey",
-          "when": "view == copilot-amplify.providers && viewItem == 'dynamic-provider'",
-          "group": "inline@4"
         },
         {
           "command": "copilot-amplify.loadModels",
-          "when": "view == copilot-amplify.providers && viewItem == 'omniroute-provider'",
-          "group": "inline@1"
+          "when": "view == copilot-amplify.providers && (viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
+          "group": "1_models@1"
         },
         {
           "command": "copilot-amplify.CA-omniroute.editBaseUrl",
           "when": "view == copilot-amplify.providers && viewItem == 'omniroute-provider'",
-          "group": "inline@2"
+          "group": "2_setup@1"
         },
         {
           "command": "copilot-amplify.setApiKey",
-          "when": "view == copilot-amplify.providers && viewItem == 'omniroute-provider'",
-          "group": "inline@3"
-        },
-        {
-          "command": "copilot-amplify.testConnection",
-          "when": "view == copilot-amplify.providers && viewItem == 'omniroute-provider'",
-          "group": "inline@4"
+          "when": "view == copilot-amplify.providers && (viewItem == 'provider' || viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
+          "group": "2_setup@2"
         },
         {
           "command": "copilot-amplify.clearApiKey",
+          "when": "view == copilot-amplify.providers && (viewItem == 'provider' || viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
+          "group": "2_setup@3"
+        },
+        {
+          "command": "copilot-amplify.testConnection",
+          "when": "view == copilot-amplify.providers && (viewItem == 'provider' || viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
+          "group": "3_check@1"
+        },
+        {
+          "command": "copilot-amplify.CA-omniroute.showDiagnostics",
           "when": "view == copilot-amplify.providers && viewItem == 'omniroute-provider'",
-          "group": "inline@5"
+          "group": "3_check@2"
+        },
+        {
+          "command": "copilot-amplify.CA-omniroute.showTelemetry",
+          "when": "view == copilot-amplify.providers && viewItem == 'omniroute-provider'",
+          "group": "3_check@3"
         },
         {
           "command": "copilot-amplify.pinModel",
@@ -267,14 +340,24 @@
           "group": "inline@1"
         },
         {
+          "command": "copilot-amplify.unpinModel",
+          "when": "view == copilot-amplify.providers && viewItem == 'favorite-model'",
+          "group": "inline@1"
+        },
+        {
           "command": "copilot-amplify.selectModel",
           "when": "view == copilot-amplify.providers && (viewItem == 'model' || viewItem == 'favorite-model')",
-          "group": "inline@2"
+          "group": "1_model@1"
+        },
+        {
+          "command": "copilot-amplify.pinModel",
+          "when": "view == copilot-amplify.providers && viewItem == 'model'",
+          "group": "1_model@2"
         },
         {
           "command": "copilot-amplify.unpinModel",
           "when": "view == copilot-amplify.providers && viewItem == 'favorite-model'",
-          "group": "inline@1"
+          "group": "1_model@2"
         }
       ]
     },
@@ -301,7 +384,7 @@
       },
       {
         "vendor": "LuneCode.CA-omniroute",
-        "displayName": "CA-Omniroute",
+        "displayName": "CA-OmniRoute",
         "managementCommand": "copilot-amplify.manage"
       },
       {
@@ -312,78 +395,103 @@
     ],
     "commands": [
       {
-        "command": "copilot-amplify.refresh",
-        "title": "Refresh Providers & Models",
-        "icon": "$(sync)"
-      },
-      {
         "command": "copilot-amplify.manage",
-        "title": "Manage Providers...",
+        "title": "Manage Providers…",
+        "category": "Copilot Amplify",
         "icon": "$(gear)"
       },
       {
-        "command": "copilot-amplify.loadModels",
-        "title": "Load Models",
-        "icon": "$(cloud-download)"
+        "command": "copilot-amplify.refresh",
+        "title": "Refresh Providers and Models",
+        "category": "Copilot Amplify",
+        "icon": "$(refresh)"
       },
       {
         "command": "copilot-amplify.setApiKey",
-        "title": "Set API Key",
+        "title": "Set API Key…",
+        "category": "Copilot Amplify",
         "icon": "$(key)"
       },
       {
         "command": "copilot-amplify.testConnection",
         "title": "Test Connection",
+        "category": "Copilot Amplify",
         "icon": "$(plug)"
       },
       {
         "command": "copilot-amplify.clearApiKey",
-        "title": "Clear API Key",
+        "title": "Remove API Key",
+        "category": "Copilot Amplify",
         "icon": "$(trash)"
       },
       {
-        "command": "copilot-amplify.pinModel",
-        "title": "Pin to Favorites",
-        "icon": "$(star-full)"
-      },
-      {
-        "command": "copilot-amplify.unpinModel",
-        "title": "Unpin from Favorites",
-        "icon": "$(star-delete)"
+        "command": "copilot-amplify.loadModels",
+        "title": "Load Models",
+        "category": "Copilot Amplify",
+        "icon": "$(cloud-download)"
       },
       {
         "command": "copilot-amplify.selectModel",
         "title": "Select Model",
+        "category": "Copilot Amplify",
         "icon": "$(check)"
+      },
+      {
+        "command": "copilot-amplify.pinModel",
+        "title": "Add to Favorites",
+        "category": "Copilot Amplify",
+        "icon": "$(star-empty)"
+      },
+      {
+        "command": "copilot-amplify.unpinModel",
+        "title": "Remove from Favorites",
+        "category": "Copilot Amplify",
+        "icon": "$(star-full)"
       },
       {
         "command": "copilot-amplify.provider.click",
         "title": "Open Provider",
-        "enablement": "false"
+        "category": "Copilot Amplify"
+      },
+      {
+        "command": "copilot-amplify.showDiagnostics",
+        "title": "Show Diagnostics",
+        "category": "Copilot Amplify",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "copilot-amplify.showNetworkQuality",
+        "title": "Show Network Quality",
+        "category": "Copilot Amplify",
+        "icon": "$(dashboard)"
       },
       {
         "command": "copilot-amplify.documentation",
-        "title": "Documentation & Guide"
+        "title": "Open Documentation",
+        "category": "Copilot Amplify",
+        "icon": "$(book)"
       },
       {
         "command": "copilot-amplify.report",
-        "title": "Report Issue or Feedback"
+        "title": "Report an Issue",
+        "category": "Copilot Amplify",
+        "icon": "$(report)"
       },
       {
         "command": "copilot-amplify.CA-omniroute.configure",
-        "title": "OmniRoute: Configure…",
+        "title": "OmniRoute: Set Up…",
         "category": "Copilot Amplify",
-        "icon": "$(gear)"
+        "icon": "$(settings-gear)"
       },
       {
         "command": "copilot-amplify.CA-omniroute.editBaseUrl",
-        "title": "OmniRoute: Edit Base URL",
+        "title": "OmniRoute: Change Server URL…",
         "category": "Copilot Amplify",
         "icon": "$(link)"
       },
       {
         "command": "copilot-amplify.CA-omniroute.setApiKey",
-        "title": "OmniRoute: Set API Key",
+        "title": "OmniRoute: Set API Key…",
         "category": "Copilot Amplify",
         "icon": "$(key)"
       },
@@ -401,9 +509,9 @@
       },
       {
         "command": "copilot-amplify.CA-omniroute.refreshModels",
-        "title": "OmniRoute: Refresh Models",
+        "title": "OmniRoute: Reload Models",
         "category": "Copilot Amplify",
-        "icon": "$(sync)"
+        "icon": "$(refresh)"
       },
       {
         "command": "copilot-amplify.CA-omniroute.showDiagnostics",
@@ -412,15 +520,16 @@
         "icon": "$(pulse)"
       },
       {
-        "command": "copilot-amplify.CA-omniroute.resetConfiguration",
-        "title": "OmniRoute: Reset Configuration",
+        "command": "copilot-amplify.CA-omniroute.showTelemetry",
+        "title": "OmniRoute: Show Request Log",
         "category": "Copilot Amplify",
-        "icon": "$(discard)"
+        "icon": "$(output)"
       },
       {
-        "command": "copilot-amplify.CA-omniroute.showTelemetry",
-        "title": "Show Omniroute Telemetry",
-        "icon": "$(output)"
+        "command": "copilot-amplify.CA-omniroute.resetConfiguration",
+        "title": "OmniRoute: Reset Settings…",
+        "category": "Copilot Amplify",
+        "icon": "$(discard)"
       }
     ]
   },

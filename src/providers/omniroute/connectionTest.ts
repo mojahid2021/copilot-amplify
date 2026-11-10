@@ -23,7 +23,7 @@ export async function testOmnirouteConnection(args: ConnectionTestArgs): Promise
   if (!validation.ok) {
     return {
       ok: false,
-      message: `Invalid Base URL — ${validation.error ?? 'malformed URL'}`,
+      message: `The server URL is not valid. ${validation.error ?? ''}`.trim(),
     };
   }
 
@@ -51,10 +51,10 @@ export async function testOmnirouteConnection(args: ConnectionTestArgs): Promise
     if (!response.ok) {
       const reason =
         response.status === 401 || response.status === 403
-          ? 'Authentication failed'
+          ? 'Your API key was not accepted'
           : response.status === 404
-            ? 'Models endpoint not found — check the Base URL includes the correct path'
-            : `Server returned HTTP ${response.status}`;
+            ? 'The server has no /models endpoint. Check that the URL ends with /v1'
+            : `The server returned HTTP ${response.status}`;
       return { ok: false, message: reason, httpStatus: response.status, latencyMs };
     }
 
@@ -64,7 +64,7 @@ export async function testOmnirouteConnection(args: ConnectionTestArgs): Promise
     } catch {
       return {
         ok: false,
-        message: 'Response was not valid JSON — is this an OmniRoute server?',
+        message: 'The server did not respond like an OmniRoute server. Check the URL',
         httpStatus: response.status,
         latencyMs,
       };
@@ -74,7 +74,7 @@ export async function testOmnirouteConnection(args: ConnectionTestArgs): Promise
     if (models.length === 0) {
       return {
         ok: false,
-        message: 'Connected, but no chat-capable models are available',
+        message: 'Connected, but the server has no chat models',
         httpStatus: response.status,
         latencyMs,
       };
@@ -83,7 +83,7 @@ export async function testOmnirouteConnection(args: ConnectionTestArgs): Promise
     return { ok: true, message: 'Connected', latencyMs, modelCount: models.length };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      return { ok: false, message: `Timed out after ${cfg.discoveryTimeoutMs} ms` };
+      return { ok: false, message: `No response within ${cfg.discoveryTimeoutMs / 1000} seconds` };
     }
     return {
       ok: false,

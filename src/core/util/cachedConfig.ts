@@ -1,5 +1,10 @@
 import * as vscode from 'vscode';
 
+/** `value` when it is a positive finite number, else `fallback`. For numeric settings. */
+export function positiveNumber(value: number | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 export interface CachedConfigHandle<T> {
   get(): T;
   readonly onChange: vscode.Event<void>;

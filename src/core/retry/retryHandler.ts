@@ -1,6 +1,6 @@
 import type * as vscode from 'vscode';
 import { ApiError } from '../api/client';
-import { NetworkError, RateLimitError, TimeoutError, ProviderUnavailableError, isCancellation } from '../errors';
+import { isCancellation } from '../errors';
 import { CircuitOpenError } from '../resilience/circuitBreaker';
 
 /**
@@ -12,14 +12,10 @@ import { CircuitOpenError } from '../resilience/circuitBreaker';
  * - Never retries authentication/invalid-request/model-not-found errors.
  */
 
-export interface RetryOptions {
-  /** Retries AFTER the first attempt. Default 3. */
-  maxRetries?: number;
-  initialDelayMs?: number;
-  maxDelayMs?: number;
-  /** Total wall-clock budget across all attempts. Unlimited when omitted. */
-  budgetMs?: number;
-}
+/** Retries after the first attempt. */
+const MAX_RETRIES = 3;
+const INITIAL_DELAY_MS = 1_000;
+const MAX_DELAY_MS = 10_000;
 
 /** Status codes worth retrying (transient failures). */
 export const RETRYABLE_STATUS_CODES: ReadonlySet<number> = new Set([408, 429, 500, 502, 503, 504]);
@@ -46,10 +42,9 @@ export function isRetryableError(error: unknown): boolean {
     return false;
   }
   if (error instanceof ApiError) {
-    return RETRYABLE_STATUS_CODES.has(error.statusCode);
-  }
-  if (error instanceof RateLimitError || error instanceof TimeoutError || error instanceof NetworkError || error instanceof ProviderUnavailableError) {
-    return true;
+    // Status 0 = no HTTP response (connection reset, DNS, timeout). User
+    // cancels never reach here: isCancellation / the token check run first.
+    return error.statusCode === 0 || RETRYABLE_STATUS_CODES.has(error.statusCode);
   }
   if (error instanceof Error) {
     const message = error.message;
@@ -113,14 +108,8 @@ function sleep(ms: number, token?: vscode.CancellationToken): Promise<void> {
 export async function executeWithRetry<T>(
   operation: () => Promise<T>,
   token?: vscode.CancellationToken,
-  options: RetryOptions = {},
 ): Promise<T> {
-  const maxRetries = options.maxRetries ?? 3;
-  const initialDelay = options.initialDelayMs ?? 1000;
-  const maxDelay = options.maxDelayMs ?? 10000;
-  const deadline = options.budgetMs !== undefined ? Date.now() + options.budgetMs : undefined;
-
-  let delay = initialDelay;
+  let delay = INITIAL_DELAY_MS;
 
   for (let attempt = 0; ; attempt++) {
     if (token?.isCancellationRequested) {
@@ -133,16 +122,13 @@ export async function executeWithRetry<T>(
       if (token?.isCancellationRequested || isCancellation(error)) {
         throw createCancellationError();
       }
-      if (attempt >= maxRetries || !isRetryableError(error)) {
-        throw error;
-      }
-      if (deadline !== undefined && Date.now() + delay >= deadline) {
+      if (attempt >= MAX_RETRIES || !isRetryableError(error)) {
         throw error;
       }
 
       const retryAfterMs = extractRetryAfterMs(error);
-      const backoff = Math.min(maxDelay, delay);
-      // Full jitter: uniform between 50% and 100% of the computed backoff.
+      const backoff = Math.min(MAX_DELAY_MS, delay);
+      // Jitter: a random wait between 50% and 100% of the backoff.
       const jittered = Math.floor(backoff * (0.5 + Math.random() * 0.5));
       const waitMs = retryAfterMs !== undefined ? Math.max(retryAfterMs, jittered) : jittered;
       delay *= 2;

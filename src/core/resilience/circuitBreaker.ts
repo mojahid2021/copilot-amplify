@@ -1,13 +1,9 @@
 import { logger } from '../logging/logger';
-import { ProviderUnavailableError } from '../errors';
 
-/**
- * Rejected because the circuit is open (or its half-open probe slot is
- * taken). Subtypes {@link ProviderUnavailableError} so existing handlers keep
- * working, but carries a distinct identity so the retry layer can avoid
- * burning its backoff budget against a breaker that will keep refusing.
- */
-export class CircuitOpenError extends ProviderUnavailableError {}
+/** Thrown instead of calling the provider while the circuit is open. Never retried. */
+export class CircuitOpenError extends Error {
+  override readonly name = 'CircuitOpenError';
+}
 
 /**
  * Lightweight per-provider circuit breaker.

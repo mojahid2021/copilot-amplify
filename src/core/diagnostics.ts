@@ -27,15 +27,7 @@ export async function buildAmplifyDiagnostics(registry: ProviderRegistry): Promi
     }
     lines.push(`API Key:         ${keyConfigured ? 'Configured' : 'Not configured'}`);
 
-    let provider;
-    try {
-      provider = registry.provider(descriptor.id);
-    } catch (error) {
-      lines.push(`Status:          error (${error instanceof Error ? error.message : String(error)})`);
-      lines.push('========================================');
-      continue;
-    }
-
+    const provider = registry.provider(descriptor.id);
     try {
       const health = provider.health();
       lines.push(
@@ -52,11 +44,7 @@ export async function buildAmplifyDiagnostics(registry: ProviderRegistry): Promi
       lines.push('Models:          unavailable');
     }
 
-    try {
-      lines.push(`Circuit breaker: ${provider.getCircuitState()}`);
-    } catch {
-      /* defensive: never let one provider's diagnostics break the report */
-    }
+    lines.push(`Circuit breaker: ${provider.getCircuitState()}`);
 
     const outcome = provider.getLatestRequestOutcome();
     if (outcome) {
@@ -74,8 +62,8 @@ export async function buildAmplifyDiagnostics(registry: ProviderRegistry): Promi
 
   lines.push(
     '',
-    'Tip: "Copilot Amplify: Show Omniroute Telemetry" opens per-request routing/cost logs.',
-    'API keys are stored exclusively in VS Code SecretStorage and are never displayed.',
+    'Tip: "Copilot Amplify: OmniRoute: Show Request Log" shows the route, latency and cost of each OmniRoute request.',
+    'API keys are kept in your system keychain and never appear in this report.',
   );
   return lines.join('\n');
 }

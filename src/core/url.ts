@@ -14,52 +14,6 @@ export interface UrlValidation {
 }
 
 /**
- * Resolve a possibly-custom endpoint against a base URL.
- *
- * - Empty override → `joinEndpoint(baseUrl, fallbackPath)`.
- * - Absolute http(s) URL → validated and used as-is (invalid input falls back).
- * - Otherwise treated as a path relative to `baseUrl` (leading `/` optional,
- *   duplicated slashes collapsed).
- */
-export function resolveCustomEndpoint(
-  baseUrl: string,
-  custom: string | undefined,
-  fallbackPath: string,
-): string {
-  const trimmed = (custom ?? '').trim();
-  if (!trimmed) {
-    return joinEndpoint(baseUrl, fallbackPath);
-  }
-
-  if (/^https?:\/\//i.test(trimmed)) {
-    // Absolute override — only accept well-formed, credential-free URLs.
-    try {
-      const url = new URL(trimmed);
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-        return joinEndpoint(baseUrl, fallbackPath);
-      }
-      if (url.username || url.password) {
-        return joinEndpoint(baseUrl, fallbackPath);
-      }
-      return url.toString().replace(/\/$/, '');
-    } catch {
-      return joinEndpoint(baseUrl, fallbackPath);
-    }
-  }
-
-  // Any other embedded scheme (e.g. `ftp://…`, `file://…`) is not accepted as
-  // a relative path either — fall back rather than smuggling it into the URL.
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
-    return joinEndpoint(baseUrl, fallbackPath);
-  }
-
-  // Relative path: normalize separators so `chat/completions`,
-  // `/chat/completions` and `//chat//completions` all behave identically.
-  const path = `/${trimmed.replace(/^\/+/, '').replace(/\/{2,}/g, '/')}`;
-  return joinEndpoint(baseUrl, path);
-}
-
-/**
  * Normalize a user-supplied base URL.
  * Returns the normalized URL, or the fallback when input is empty/invalid.
  */

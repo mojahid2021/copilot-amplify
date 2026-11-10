@@ -14,7 +14,7 @@ interface LanguageModelConfigurationSchema {
   properties: Record<string, LanguageModelConfigurationProperty>;
 }
 
-interface ConfigurableLanguageModelChatInformation extends vscode.LanguageModelChatInformation {
+export interface ConfigurableLanguageModelChatInformation extends vscode.LanguageModelChatInformation {
   configurationSchema?: LanguageModelConfigurationSchema;
 }
 

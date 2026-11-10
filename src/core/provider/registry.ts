@@ -3,12 +3,9 @@ import type { BaseAuthManager } from '../auth/authManager';
 import type { BaseChatProvider } from './baseChatProvider';
 
 /**
- * Central provider registry.
- *
- * Every provider — Xiaomi, Z.ai, Groq, NVIDIA NIM and OmniRoute alike — is
- * registered here as an equal sibling. The registry owns lazy instantiation,
- * vendor registration with the VS Code Language Model API, and disposal.
- * Adding a provider means adding a descriptor; no core logic changes.
+ * Holds every provider's descriptor and creates its auth manager and chat
+ * provider on first use. Adding a provider means adding a descriptor; the
+ * registry itself never changes.
  */
 
 export type ProviderId = 'xiaomi' | 'glm' | 'groq' | 'nvidia' | 'omniroute' | 'agentrouter';
@@ -78,18 +75,8 @@ export interface AmplifyProviderFacet {
   refreshCaches(): void;
   /** Current health snapshot for the tree/diagnostics. */
   health(): ProviderHealth;
-  /** Optional eager re-discovery (OmniRoute dynamic catalogs). */
-  warmupNow?(): Promise<unknown>;
-}
-
-export function isFacet(provider: unknown): provider is BaseChatProvider & AmplifyProviderFacet {
-  return (
-    !!provider &&
-    typeof (provider as AmplifyProviderFacet).testConnection === 'function' &&
-    typeof (provider as AmplifyProviderFacet).listModelsForTree === 'function' &&
-    typeof (provider as AmplifyProviderFacet).refreshCaches === 'function' &&
-    typeof (provider as AmplifyProviderFacet).health === 'function'
-  );
+  /** Fetch the model list from the server (dynamic catalogs only). Never throws. */
+  loadModels?(): Promise<vscode.LanguageModelChatInformation[]>;
 }
 
 interface RegistryEntry {
@@ -122,8 +109,10 @@ export class ProviderRegistry implements vscode.Disposable {
     if (!entry) {
       throw new Error(`Unknown provider: ${id}`);
     }
-    entry.auth ??= entry.descriptor.createAuth(this.secrets);
-    this.disposables.push(entry.auth);
+    if (!entry.auth) {
+      entry.auth = entry.descriptor.createAuth(this.secrets);
+      this.disposables.push(entry.auth);
+    }
     return entry.auth;
   }
 

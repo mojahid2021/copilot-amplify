@@ -1,10 +1,3 @@
-/**
- * Provider registry assembly.
- *
- * Every provider is registered here as an equal sibling. Adding a provider =
- * adding a descriptor module + one `register()` call below. No core changes.
- */
-
 import type * as vscode from 'vscode';
 import { ProviderRegistry } from '../core/provider/registry';
 import { createXiaomiDescriptor } from './xiaomi';
@@ -14,9 +7,7 @@ import { createNvidiaDescriptor } from './nvidia';
 import { createOmnirouteDescriptor } from './omniroute/descriptor';
 import { createAgentrouterDescriptor } from './agentrouter/descriptor';
 
-export type { ProviderId, AmplifyProviderDescriptor, ProviderHealth, ConnectionTestResult, ProviderTreeModel } from '../core/provider/registry';
-export { ProviderRegistry } from '../core/provider/registry';
-
+/** Every provider the extension ships. Registration order is display order. */
 export function createProviderRegistry(secrets: vscode.SecretStorage): ProviderRegistry {
   const registry = new ProviderRegistry(secrets);
   registry.register(createXiaomiDescriptor());
@@ -27,6 +18,3 @@ export function createProviderRegistry(secrets: vscode.SecretStorage): ProviderR
   registry.register(createAgentrouterDescriptor());
   return registry;
 }
-
-/** Provider ids in stable display order (used by QuickPicks and the tree). */
-export const PROVIDER_ORDER = ['xiaomi', 'glm', 'groq', 'nvidia', 'omniroute', 'agentrouter'] as const;

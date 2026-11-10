@@ -4,7 +4,8 @@ import type {
   ChatCompletionCreateParamsNonStreaming,
 } from 'openai/resources/chat/completions/completions';
 import type * as vscode from 'vscode';
-import { ApiError, GenericApiClient, customFetch, streamingChatFetch, type ChatOptions, type GenericMessage } from '../../core/api/client';
+import { ApiError, GenericApiClient, streamingChatFetch, type ChatOptions, type GenericMessage } from '../../core/api/client';
+import { apiErrorFromResponse, createRequestSignal, errorMessageFromBody, toApiError } from '../../core/api/http';
 import { parseSseStream } from '../../core/api/sse';
 import { joinEndpoint, normalizeBaseUrl } from '../../core/url';
 import { getOmnirouteConfig, getOmnirouteBaseUrl } from './config';
@@ -23,6 +24,7 @@ import { logger } from '../../core/logging/logger';
  */
 
 const log = logger.child({ provider: 'OmniRoute' });
+const ERROR_LABEL = 'OmniRoute API error';
 
 export interface OmnirouteClientOptions {
   /** Caller-supplied conversation tag. Beats the `sessionId` setting. */
@@ -87,27 +89,6 @@ function toStreamChunkFromCompletion(
   };
 }
 
-function toApiErrorFromResponse(status: number, body: unknown, headers?: Record<string, string>): ApiError {
-  let detail = '';
-  if (body && typeof body === 'object') {
-    const error = (body as { error?: { message?: unknown } }).error;
-    if (error && typeof error.message === 'string') {
-      detail = error.message;
-    }
-  }
-  // Headers (notably Retry-After) ride along so the retry handler can honor them.
-  return new ApiError(`Omniroute API error: ${status}${detail ? ` ${detail}` : ''}`, status, body, headers);
-}
-
-/** Flatten a fetch `Headers` object into a lowercase-keyed plain record. */
-function headersToRecord(headers: Headers): Record<string, string> {
-  const out: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    out[key.toLowerCase()] = value;
-  });
-  return out;
-}
-
 function logResponseTelemetry(response: Response, requestModel: string): void {
   try {
     const record = parseOmnirouteTelemetry(
@@ -148,16 +129,7 @@ export class OmnirouteApiClient extends GenericApiClient {
     });
     this.apiKey = apiKey;
     this.sessionId = options?.sessionId?.trim() || undefined;
-    // OmniRoute customFetch is the non-keep-alive variant: this client is
-    // used for short-lived calls (model discovery, connection test) where
-    // we want the socket to close once the response is consumed. Streaming
-    // chat requests below opt into keep-alive explicitly.
-    this.fetchImpl = options?.fetchImpl ?? customFetch;
-  }
-
-  /** True when a conversation tag will be attached. */
-  hasSessionId(): boolean {
-    return true; // always: explicit or window-generated
+    this.fetchImpl = options?.fetchImpl ?? fetch;
   }
 
   private buildBody(model: string, messages: GenericMessage[], options?: ChatOptions, stream = true): Record<string, unknown> {
@@ -217,47 +189,24 @@ export class OmnirouteApiClient extends GenericApiClient {
     options?: ChatOptions,
     cancellationToken?: vscode.CancellationToken,
   ): AsyncGenerator<ChatCompletionChunk> {
-    const abortController = new AbortController();
-    const requestTimeout = setTimeout(
-      () => abortController.abort(),
-      getOmnirouteConfig().requestTimeoutMs,
-    );
-    requestTimeout.unref?.();
-    const cancellationDisposable = cancellationToken?.onCancellationRequested(() =>
-      abortController.abort(),
-    );
-
+    const request = createRequestSignal({ timeoutMs: getOmnirouteConfig().requestTimeoutMs, token: cancellationToken });
     try {
-      // Long-lived stream: use keep-alive to amortize TLS/TCP handshakes
-      // across token chunks.
       const response = await streamingChatFetch(this.getEndpoint('/chat/completions'), {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(this.buildBody(model, messages, options, true)),
-        signal: abortController.signal,
+        signal: request.signal,
       });
-
-      if (getOmnirouteConfig().logTelemetry) {
-        logResponseTelemetry(response, model);
-      }
-
+      this.logTelemetry(response, model);
       if (!response.ok) {
-        let body: unknown;
-        try {
-          body = await response.json();
-        } catch {
-          body = undefined;
-        }
-        throw toApiErrorFromResponse(response.status, body, headersToRecord(response.headers));
+        throw await apiErrorFromResponse(response, ERROR_LABEL);
       }
-
-      const contentType = response.headers.get('content-type') ?? '';
       if (!response.body) {
-        throw new ApiError('Omniroute API error: empty response body', 0);
+        throw new ApiError(`${ERROR_LABEL}: empty response body`, 0);
       }
 
       // Some upstreams reply with plain JSON even when `stream: true`.
-      if (!contentType.includes('text/event-stream')) {
+      if (!(response.headers.get('content-type') ?? '').includes('text/event-stream')) {
         const completion = (await response.json()) as Parameters<typeof toStreamChunkFromCompletion>[0];
         yield toStreamChunkFromCompletion(completion);
         return;
@@ -265,81 +214,55 @@ export class OmnirouteApiClient extends GenericApiClient {
 
       for await (const event of parseSseStream(response.body)) {
         if (cancellationToken?.isCancellationRequested) {
-          // Cancel the underlying body reader so we stop reading from the
-          // network immediately. Otherwise the upstream connection keeps
-          // pumping chunks into the void until the server-side timeout.
-          try {
-            await response.body?.cancel();
-          } catch {
-            /* best-effort */
-          }
+          // Stop reading now; otherwise the server keeps streaming into the void.
+          await response.body.cancel().catch(() => {});
           return;
         }
-        if (event && typeof event === 'object' && 'error' in event) {
-          throw toApiErrorFromResponse(0, event);
+        if ('error' in event) {
+          const detail = errorMessageFromBody(event);
+          throw new ApiError(`${ERROR_LABEL}: 0${detail ? ` ${detail}` : ''}`, 0, event);
         }
         if (Array.isArray(event.choices)) {
           yield event as unknown as ChatCompletionChunk;
         }
       }
     } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
       if (error instanceof Error && error.name === 'AbortError') {
         return;
       }
-      throw new ApiError(`Omniroute API error: ${error instanceof Error ? error.message : String(error)}`, 0);
+      throw toApiError(error, ERROR_LABEL);
     } finally {
-      clearTimeout(requestTimeout);
-      cancellationDisposable?.dispose();
+      request.dispose();
     }
   }
 
   async chatNonStreaming(model: string, messages: GenericMessage[], options?: ChatOptions): Promise<string> {
-    const abortController = new AbortController();
-    const requestTimeout = setTimeout(
-      () => abortController.abort(),
-      getOmnirouteConfig().requestTimeoutMs,
-    );
-    requestTimeout.unref?.();
-
+    const request = createRequestSignal({ timeoutMs: getOmnirouteConfig().requestTimeoutMs });
     try {
-      // Short-lived fallback: no keep-alive so the socket closes after the
-      // response body is consumed.
+      // Short-lived fallback request: no keep-alive, so the socket closes afterwards.
       const response = await this.fetchImpl(this.getEndpoint('/chat/completions'), {
         method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(this.buildBody(model, messages, options, false)),
-        signal: abortController.signal,
+        signal: request.signal,
       });
-
-      if (getOmnirouteConfig().logTelemetry) {
-        logResponseTelemetry(response, model);
-      }
-
+      this.logTelemetry(response, model);
       if (!response.ok) {
-        let body: unknown;
-        try {
-          body = await response.json();
-        } catch {
-          body = undefined;
-        }
-        throw toApiErrorFromResponse(response.status, body, headersToRecord(response.headers));
+        throw await apiErrorFromResponse(response, ERROR_LABEL);
       }
-
-      const completion = (await response.json()) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
-      };
+      const completion = (await response.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = completion.choices?.[0]?.message?.content;
       return typeof content === 'string' ? content : '';
     } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      throw new ApiError(`Omniroute API error: ${error instanceof Error ? error.message : String(error)}`, 0);
+      throw toApiError(error, ERROR_LABEL);
     } finally {
-      clearTimeout(requestTimeout);
+      request.dispose();
+    }
+  }
+
+  private logTelemetry(response: Response, model: string): void {
+    if (getOmnirouteConfig().logTelemetry) {
+      logResponseTelemetry(response, model);
     }
   }
 }

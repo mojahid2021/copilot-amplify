@@ -3,15 +3,14 @@ import type { GenericContentPart, GenericMessage } from '../api/client';
 import { convertMessages } from './converter';
 import { getGlobalConfig } from '../globalConfig';
 
+const TRUNCATED_TOOL_OUTPUT = '[output truncated to fit the context window]';
+
 export interface ContextWindowConfig {
   maxInputTokens: number;
   reserveOutputTokens: number;
-  customSystemPrompt?: string;
 }
 
-/**
- * Fast character-based token estimator (approx 3.8 chars per token).
- */
+/** Rough token count: about 3.8 characters per token, images count as 1000 characters. */
 export function estimateMessageTokens(message: GenericMessage): number {
   let chars = message.role.length;
   if (typeof message.content === 'string') {
@@ -21,7 +20,7 @@ export function estimateMessageTokens(message: GenericMessage): number {
       if (part.type === 'text') {
         chars += part.text.length;
       } else if (part.type === 'image_url') {
-        chars += 1000; // Fixed token weight for image parts
+        chars += 1000;
       }
     }
   }
@@ -32,8 +31,10 @@ export function estimateMessageTokens(message: GenericMessage): number {
 }
 
 /**
- * Prepares messages for API request: injects custom system prompts and truncates
- * older user/assistant messages if token count exceeds model budget.
+ * Convert VS Code messages for the API, add the custom system prompt, and
+ * trim the oldest turns until the conversation fits the model's input budget.
+ * Tool calls and their results are always kept or dropped together, because
+ * APIs reject a tool result whose call is missing (and vice versa).
  */
 export function prepareContextMessages(
   vsMessages: readonly vscode.LanguageModelChatRequestMessage[],
@@ -42,37 +43,18 @@ export function prepareContextMessages(
 ): GenericMessage[] {
   const converted = convertMessages(vsMessages, allowImages);
 
-  // 1. Inject Custom System Prompt if configured
-  const systemPrompt =
-    config.customSystemPrompt?.trim() ||
-    getGlobalConfig().customSystemPrompt ||
-    '';
-
-  if (systemPrompt) {
-    const existingSystemIdx = converted.findIndex((m) => m.role === 'system');
-    if (existingSystemIdx >= 0) {
-      const existing = converted[existingSystemIdx];
-      if (!existing) {
-        converted.unshift({ role: 'system', content: systemPrompt });
-      } else {
-      const existingText =
-        typeof existing.content === 'string'
-          ? existing.content
-          : (existing.content as GenericContentPart[])
-              .filter((p) => p.type === 'text')
-              .map((p) => p.text)
-              .join('');
-      converted[existingSystemIdx] = {
-        role: 'system',
-        content: `${systemPrompt}\n\n${existingText}`,
-      };
-      }
+  // The user's custom system prompt goes in front of Copilot's own.
+  const customPrompt = getGlobalConfig().customSystemPrompt;
+  if (customPrompt) {
+    const existing = converted.find((m) => m.role === 'system');
+    if (existing) {
+      existing.content = `${customPrompt}\n\n${textOf(existing.content)}`;
     } else {
-      converted.unshift({ role: 'system', content: systemPrompt });
+      converted.unshift({ role: 'system', content: customPrompt });
     }
   }
 
-  // 2. Truncate context if budget exceeded
+  // Over budget: drop the oldest turns first.
   const budget = Math.max(1024, config.maxInputTokens - config.reserveOutputTokens);
   let totalTokens = converted.reduce((sum, msg) => sum + estimateMessageTokens(msg), 0);
 
@@ -86,22 +68,22 @@ export function prepareContextMessages(
     if (target && target.role === 'assistant' && target.tool_calls?.length) {
       // Remove assistant tool call message + matching tool result messages to preserve valid schema
       const callIds = new Set(target.tool_calls.map((c) => c.id));
-      nonSystemMsgs.shift();
-      totalTokens -= estimateMessageTokens(target);
-
+      let groupSize = 1;
       for (;;) {
-        const toolMsg = nonSystemMsgs[0];
-        if (
-          nonSystemMsgs.length > 0 &&
-          toolMsg?.role === 'tool' &&
-          toolMsg.tool_call_id &&
-          callIds.has(toolMsg.tool_call_id)
-        ) {
-          nonSystemMsgs.shift();
-          totalTokens -= estimateMessageTokens(toolMsg);
+        const toolMsg = nonSystemMsgs[groupSize];
+        if (toolMsg?.role === 'tool' && toolMsg.tool_call_id && callIds.has(toolMsg.tool_call_id)) {
+          groupSize++;
           continue;
         }
         break;
+      }
+      // The group is the newest turn (agent mode: tool result last). Dropping it
+      // would leave no conversation at all; let the content trimmer below shrink it.
+      if (groupSize >= nonSystemMsgs.length) {
+        break;
+      }
+      for (const removed of nonSystemMsgs.splice(0, groupSize)) {
+        totalTokens -= estimateMessageTokens(removed);
       }
     } else {
       const removed = nonSystemMsgs.shift();
@@ -114,8 +96,10 @@ export function prepareContextMessages(
   // Last-resort: if a single message still exceeds the budget (e.g., one very
   // long user turn), trim content from the beginning so we stay within limits.
   // We preserve the tail of the message since it is most likely to be relevant.
-  while (nonSystemMsgs.length > 0 && totalTokens > budget) {
-    const target = nonSystemMsgs[0];
+  while (totalTokens > budget) {
+    // Skip assistant tool-call messages: removing one orphans its tool results.
+    const targetIdx = nonSystemMsgs.findIndex((m) => !(m.role === 'assistant' && m.tool_calls?.length));
+    const target = nonSystemMsgs[targetIdx];
     if (!target) break;
 
     const prevTokens = estimateMessageTokens(target);
@@ -125,8 +109,11 @@ export function prepareContextMessages(
       const charBudget = Math.max(0, target.content.length - Math.ceil(excess * 3.8));
       if (charBudget > 0) {
         target.content = target.content.slice(target.content.length - charBudget);
+      } else if (target.role === 'tool') {
+        // A tool result must stay so its tool call remains valid; empty it instead.
+        target.content = TRUNCATED_TOOL_OUTPUT;
       } else {
-        nonSystemMsgs.shift();
+        nonSystemMsgs.splice(targetIdx, 1);
         shifted = true;
       }
     } else if (Array.isArray(target.content)) {
@@ -141,14 +128,15 @@ export function prepareContextMessages(
           dropped = true;
         }
       }
-      if (!dropped) { nonSystemMsgs.shift(); shifted = true; }
+      if (!dropped) { nonSystemMsgs.splice(targetIdx, 1); shifted = true; }
     }
 
     // Update incrementally — only re-estimate the one mutated message, not the whole array.
-    totalTokens = shifted
-      ? totalTokens - prevTokens
-      : totalTokens - prevTokens + estimateMessageTokens(target);
-    if (totalTokens <= budget) break;
+    const newTokens = shifted ? 0 : estimateMessageTokens(target);
+    if (!shifted && newTokens >= prevTokens) {
+      break; // nothing left to trim (e.g. the system prompt alone exceeds the budget)
+    }
+    totalTokens = totalTokens - prevTokens + newTokens;
   }
 
   // Ensure sequence does not start with an orphaned tool message
@@ -175,4 +163,10 @@ export function prepareContextMessages(
   }
 
   return [...systemMsgs, ...nonSystemMsgs];
+}
+
+function textOf(content: string | GenericContentPart[]): string {
+  return typeof content === 'string'
+    ? content
+    : content.map((part) => (part.type === 'text' ? part.text : '')).join('');
 }

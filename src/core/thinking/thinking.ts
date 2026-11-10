@@ -1,5 +1,6 @@
-const THINK_OPEN_MARKDOWN = '<details><summary>Thinking</summary>\n\n';
-const THINK_CLOSE_MARKDOWN = '\n\n</details>\n\n';
+/** Markdown used to show reasoning as a collapsible block in the answer. */
+export const THINKING_BLOCK_OPEN = '<details><summary>Thinking</summary>\n\n';
+export const THINKING_BLOCK_CLOSE = '\n\n</details>\n\n';
 
 export interface ThinkingState {
   buffer: string;
@@ -7,8 +8,8 @@ export interface ThinkingState {
 }
 
 // Pre-computed lowercased tag markers so we never recompute them per call.
-const OPEN_TAGS_LOWER = ['<details>', '<thought>'].map((t) => t.toLowerCase());
-const CLOSE_TAGS_LOWER = ['</details>', '</thought>'].map((t) => t.toLowerCase());
+const OPEN_TAGS_LOWER = ['<think>', '<thought>'];
+const CLOSE_TAGS_LOWER = ['</think>', '</thought>'];
 
 /**
  * Find the earliest opening tag match in `lower` (already lowercased).
@@ -52,20 +53,8 @@ function getPartialSuffixLength(lower: string, tagsLower: string[]): number {
 }
 
 function appendThinkingSegment(segment: string, insideThinking: boolean): string {
-  return insideThinking ? `${segment}${THINK_CLOSE_MARKDOWN}` : `${segment}${THINK_OPEN_MARKDOWN}`;
+  return insideThinking ? `${segment}${THINKING_BLOCK_CLOSE}` : `${segment}${THINKING_BLOCK_OPEN}`;
 }
-
-// Maximum length of any supported thinking tag (</thought> = 10 chars).
-// If the partial buffer grows beyond this, it can't be a valid tag prefix — flush it.
-const MAX_TAG_LENGTH = 10;
-
-/**
- * Hard cap on the partial-tag buffer. A misbehaving model that emits a
- * `<think>` (or `<thought>`) tag but never closes it would otherwise grow
- * `state.buffer` for the entire response. Once the buffer reaches this cap
- * we flush it as regular content so the loop terminates.
- */
-const MAX_PARTIAL_BUFFER_CHARS = 4096;
 
 export function processThinkingContent(content: string, state: ThinkingState): { output: string; state: ThinkingState } {
   if (
@@ -94,22 +83,6 @@ export function processThinkingContent(content: string, state: ThinkingState): {
 
     const partialSuffixLength = getPartialSuffixLength(lower, tagsLower);
     if (partialSuffixLength === 0) {
-      output += buffer;
-      buffer = '';
-      continue;
-    }
-
-    // Safety: if the buffered partial match exceeds the maximum tag length,
-    // it can't be a valid tag — flush the entire buffer as regular content.
-    if (partialSuffixLength >= MAX_TAG_LENGTH) {
-      output += buffer;
-      buffer = '';
-      continue;
-    }
-
-    // Hard cap: a model that opens <think>/<thought> and never closes it
-    // would otherwise keep accumulating here. Flush as content and reset.
-    if (buffer.length > MAX_PARTIAL_BUFFER_CHARS) {
       output += buffer;
       buffer = '';
       continue;
