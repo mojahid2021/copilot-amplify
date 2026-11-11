@@ -29,7 +29,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     log.warn('secrets migration failed', { error: error instanceof Error ? error.message : String(error) });
   }
 
-  const registry = createProviderRegistry(context.secrets);
+  const registry = createProviderRegistry(context.secrets, context.globalState);
   context.subscriptions.push(registry);
   for (const descriptor of registry.list()) {
     try {

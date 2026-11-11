@@ -15,9 +15,8 @@ export function createAgentrouterDescriptor(): AmplifyProviderDescriptor & { id:
     vendor: AGENTROUTER_VENDOR,
     displayName: AGENTROUTER_DISPLAY_NAME,
     treeIcon: 'globe',
-    modelCountLabel: 'live',
     createAuth: (secrets) =>
       new BaseAuthManager(secrets, AGENTROUTER_SECRET_KEY, AGENTROUTER_DISPLAY_NAME),
-    createProvider: (auth) => new AgentrouterChatProvider(auth),
+    createProvider: (auth, state) => new AgentrouterChatProvider(auth, state),
   };
 }

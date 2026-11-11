@@ -1,6 +1,6 @@
-import * as vscode from 'vscode';
+import type * as vscode from 'vscode';
 import type { BaseAuthManager } from '../auth/authManager';
-import { ApiError, type ThinkingOption } from '../api/client';
+import { ApiError } from '../api/client';
 import { TTLCache } from '../resilience/cache';
 import { BaseChatProvider } from './baseChatProvider';
 import type { AmplifyProviderFacet, ConnectionTestResult, ProviderHealth, ProviderTreeModel } from './registry';
@@ -10,35 +10,43 @@ const CACHE_KEY = 'models';
 export interface DynamicCatalogOptions {
   /** How long a loaded model list counts as fresh (health shows "connected"). */
   cacheTtlMs: number;
-  /** Fires when the provider's settings change; the model list is dropped. */
-  onDidChangeConfig: vscode.Event<void>;
-  /** Settings section holding the `warmupOnStartup` flag. */
-  settingsSection: string;
+  /** Load models right after startup instead of waiting for Load Models. */
+  warmupOnStartup: boolean;
+  /** Fires when settings that affect the model list change; the list is dropped. */
+  onDidChangeConfig?: vscode.Event<void>;
+  /** Where to keep the last loaded list so it survives a VS Code restart. */
+  persist?: { state: vscode.Memento; key: string };
 }
 
 /**
- * Provider whose model list comes from the server (OmniRoute, AgentRouter).
+ * Provider whose model list comes from the server.
  *
  * Models are fetched only on an explicit user action (Load Models / Refresh,
- * or the opt-in `warmupOnStartup` setting). VS Code asks for the model list
- * often, so `provideLanguageModelChatInformation` only ever returns what is
- * already cached, even when it is stale.
+ * or the opt-in warm-up setting). VS Code asks for the model list often, so
+ * `provideLanguageModelChatInformation` only ever returns what is already
+ * known: the cache, or the list saved from the last session.
  */
 export abstract class DynamicCatalogProvider extends BaseChatProvider implements AmplifyProviderFacet {
   protected override readonly models: vscode.LanguageModelChatInformation[] = [];
 
   private readonly modelCache: TTLCache<vscode.LanguageModelChatInformation[]>;
+  private readonly persist?: DynamicCatalogOptions['persist'];
+  /** List saved by a previous session; used until the first successful load. */
+  private savedModels?: vscode.LanguageModelChatInformation[];
   private lastDiscoveryError?: { message: string; status?: number };
   private lastKnownModelIds: ReadonlySet<string> = new Set();
 
   constructor(authManager: BaseAuthManager, options: DynamicCatalogOptions) {
     super(authManager);
     this.modelCache = new TTLCache(options.cacheTtlMs);
-    this.addDisposables(
-      authManager.onDidChangeApiKey(() => this.refreshCaches()),
-      options.onDidChangeConfig(() => this.refreshCaches()),
-    );
-    if (vscode.workspace.getConfiguration(options.settingsSection).get<boolean>('warmupOnStartup', false)) {
+    this.persist = options.persist;
+    this.savedModels = this.persist?.state.get<vscode.LanguageModelChatInformation[]>(this.persist.key);
+
+    this.addDisposables(authManager.onDidChangeApiKey(() => this.refreshCaches()));
+    if (options.onDidChangeConfig) {
+      this.addDisposables(options.onDidChangeConfig(() => this.refreshCaches()));
+    }
+    if (options.warmupOnStartup) {
       // Deferred so activation itself never does network I/O.
       setTimeout(() => void this.loadModels(), 0).unref?.();
     }
@@ -65,20 +73,15 @@ export abstract class DynamicCatalogProvider extends BaseChatProvider implements
     return undefined;
   }
 
-  /** Gateways take `reasoning_effort`, never the Z.ai-style `thinking` field. */
-  protected override getThinkingOption(): ThinkingOption | undefined {
-    return undefined;
-  }
-
-  /** Discover models now. Never throws; returns the stale list on failure. */
+  /** Discover models now. Never throws; returns the last known list on failure. */
   async loadModels(): Promise<vscode.LanguageModelChatInformation[]> {
     if (!(await this.canLoadModels())) {
-      return this.cachedModels();
+      return this.knownModels();
     }
     try {
       return await this.discover();
     } catch {
-      return this.cachedModels();
+      return this.knownModels();
     }
   }
 
@@ -86,11 +89,11 @@ export abstract class DynamicCatalogProvider extends BaseChatProvider implements
     _options: vscode.PrepareLanguageModelChatModelOptions,
     token: vscode.CancellationToken,
   ): Promise<vscode.LanguageModelChatInformation[]> {
-    return token.isCancellationRequested ? [] : this.cachedModels();
+    return token.isCancellationRequested ? [] : this.knownModels();
   }
 
   async listModelsForTree(): Promise<ProviderTreeModel[]> {
-    return (this.modelCache.peek(CACHE_KEY) ?? []).map((info) => ({
+    return this.knownModels().map((info) => ({
       id: this.displayModelId(info.id),
       name: info.name,
       capabilities: {
@@ -103,10 +106,15 @@ export abstract class DynamicCatalogProvider extends BaseChatProvider implements
     }));
   }
 
+  /** Forget the model list (also the saved one); the next Load Models starts fresh. */
   refreshCaches(): void {
     this.modelCache.invalidateAll();
     this.lastDiscoveryError = undefined;
     this.lastKnownModelIds = new Set();
+    if (this.savedModels) {
+      this.savedModels = undefined;
+      void this.persist?.state.update(this.persist.key, undefined);
+    }
   }
 
   health(): ProviderHealth {
@@ -122,15 +130,17 @@ export abstract class DynamicCatalogProvider extends BaseChatProvider implements
       return { configured: true, status: kind, detail: message };
     }
 
-    const detail = fresh ? `${this.modelCache.peek(CACHE_KEY)?.length ?? 0} models` : 'Not loaded';
+    const count = this.knownModels().length;
+    const detail = count > 0 ? `${count} model${count === 1 ? '' : 's'}` : 'Models not loaded';
     if (this.getCircuitState() === 'open') {
       return { configured: true, status: 'error', detail: `${detail} · paused after repeated failures` };
     }
     return { configured: true, status: fresh ? 'connected' : 'not-configured', detail };
   }
 
-  private cachedModels(): vscode.LanguageModelChatInformation[] {
-    return this.modelCache.peekStale(CACHE_KEY) ?? [];
+  /** Cached list (even if expired), else the list saved by the last session. */
+  protected knownModels(): vscode.LanguageModelChatInformation[] {
+    return this.modelCache.peekStale(CACHE_KEY) ?? this.savedModels ?? [];
   }
 
   private async discover(): Promise<vscode.LanguageModelChatInformation[]> {
@@ -138,6 +148,8 @@ export abstract class DynamicCatalogProvider extends BaseChatProvider implements
       const models = await this.modelCache.getOrFetch(CACHE_KEY, (signal) => this.fetchModels(signal));
       this.lastDiscoveryError = undefined;
       this.breaker.recordSuccess();
+      this.savedModels = undefined;
+      void this.persist?.state.update(this.persist.key, models);
 
       // Only poke VS Code when the set of models actually changed.
       const ids = new Set(models.map((m) => m.id));

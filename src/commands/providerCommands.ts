@@ -4,7 +4,7 @@ import { buildAmplifyDiagnostics, showTextReport } from '../core/diagnostics';
 import type { ProvidersTreeDataProvider, ProviderTreeItem, ModelTreeItem } from '../ui/treeProvider';
 import { isOmnirouteBaseUrlConfigured } from '../providers/omniroute/config';
 import { qualityIcon } from '../ui/networkQuality';
-import { connectionSummary, isAuthFailure } from '../ui/notifications';
+import { asSentence, connectionSummary, isAuthFailure } from '../ui/notifications';
 
 /** Commands that work for every provider (API keys, testing, model selection, reports). */
 
@@ -26,7 +26,7 @@ const MANAGE_MENU: MenuEntry[] = [
   { label: '$(key) Set API Key…', detail: 'Add or replace the key for a provider', providerAction: 'setApiKey' },
   { label: '$(plug) Test Connection', detail: 'Check that a provider is reachable and the key works', providerAction: 'test' },
   { label: '$(trash) Remove API Key', detail: 'Delete a saved key from your keychain', providerAction: 'clearApiKey' },
-  { label: '$(refresh) Refresh Providers and Models', detail: 'Reload model lists from OmniRoute and AgentRouter', command: 'copilot-amplify.refresh' },
+  { label: '$(refresh) Refresh Providers and Models', detail: 'Reload every provider\'s model list', command: 'copilot-amplify.refresh' },
   separator('OmniRoute'),
   { label: '$(settings-gear) Set Up OmniRoute…', detail: 'Server URL, API key and a connection test', command: 'copilot-amplify.CA-omniroute.configure' },
   { label: '$(link) Change Server URL…', command: 'copilot-amplify.CA-omniroute.editBaseUrl' },
@@ -166,8 +166,8 @@ export function registerProviderCommands(context: vscode.ExtensionContext, deps:
       for (const descriptor of registry.list()) {
         const provider = registry.provider(descriptor.id);
         provider.refreshCaches();
-        // Dynamic catalogs refetch right away on an explicit refresh; failures show up in health().
-        void provider.loadModels?.().then(() => tree.refresh());
+        // Refetch right away on an explicit refresh; failures show up in health().
+        void provider.loadModels().then(() => tree.refresh());
       }
       tree.refresh();
     }),
@@ -178,19 +178,23 @@ export function registerProviderCommands(context: vscode.ExtensionContext, deps:
         return;
       }
       const provider = registry.provider(id);
-      if (!provider.loadModels || !(await ensureReady(id))) {
+      if (!(await ensureReady(id))) {
         return;
       }
       const name = displayName(id);
       const models = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `Loading ${name} models…` },
-        () => provider.loadModels!(),
+        () => provider.loadModels(),
       );
       tree.refresh();
-      if (models.length === 0) {
-        const health = provider.health();
-        const reason = health.detail && health.status !== 'not-configured' ? ` ${health.detail}` : '';
+      // A failed load keeps the previous list, so check health rather than the count.
+      const health = provider.health();
+      const failed = models.length === 0 || health.status === 'error' || health.status === 'auth-failed';
+      if (failed) {
+        const reason = health.detail && health.status !== 'not-configured' ? ` ${asSentence(health.detail)}` : '';
         void vscode.window.showWarningMessage(`No ${name} models were loaded.${reason}`);
+      } else {
+        void vscode.window.showInformationMessage(`Loaded ${models.length} ${name} models.`);
       }
     }),
 

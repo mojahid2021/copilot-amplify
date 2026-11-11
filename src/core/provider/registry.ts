@@ -56,10 +56,9 @@ export interface AmplifyProviderDescriptor {
   vendor: string;
   displayName: string;
   treeIcon: string;
-  /** Fixed model count, or 'live' for dynamically discovered catalogs. */
-  modelCountLabel: number | 'live';
   createAuth(secrets: vscode.SecretStorage): BaseAuthManager;
-  createProvider(auth: BaseAuthManager): BaseChatProvider & AmplifyProviderFacet;
+  /** `state` keeps the last loaded model list across VS Code restarts. */
+  createProvider(auth: BaseAuthManager, state: vscode.Memento): BaseChatProvider & AmplifyProviderFacet;
 }
 
 /**
@@ -75,8 +74,8 @@ export interface AmplifyProviderFacet {
   refreshCaches(): void;
   /** Current health snapshot for the tree/diagnostics. */
   health(): ProviderHealth;
-  /** Fetch the model list from the server (dynamic catalogs only). Never throws. */
-  loadModels?(): Promise<vscode.LanguageModelChatInformation[]>;
+  /** Fetch the model list from the server. Never throws; failures show in health(). */
+  loadModels(): Promise<vscode.LanguageModelChatInformation[]>;
 }
 
 interface RegistryEntry {
@@ -89,7 +88,10 @@ export class ProviderRegistry implements vscode.Disposable {
   private readonly entries = new Map<ProviderId, RegistryEntry>();
   private readonly disposables: vscode.Disposable[] = [];
 
-  constructor(private readonly secrets: vscode.SecretStorage) {}
+  constructor(
+    private readonly secrets: vscode.SecretStorage,
+    private readonly state: vscode.Memento,
+  ) {}
 
   register(descriptor: AmplifyProviderDescriptor): void {
     this.entries.set(descriptor.id, { descriptor });
@@ -126,7 +128,7 @@ export class ProviderRegistry implements vscode.Disposable {
       throw new Error(`Unknown provider: ${id}`);
     }
     if (!entry.provider) {
-      entry.provider = entry.descriptor.createProvider(this.auth(id));
+      entry.provider = entry.descriptor.createProvider(this.auth(id), this.state);
       this.disposables.push(entry.provider);
     }
     return entry.provider;

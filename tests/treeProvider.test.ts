@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createProviderRegistry } from '../src/providers';
 import { ProvidersTreeDataProvider, type ProviderTreeItem } from '../src/ui/treeProvider';
-import { fakeSecrets } from './helpers';
+import { fakeMemento, fakeSecrets } from './helpers';
 
 function treeWith(secrets: Record<string, string>) {
-  return new ProvidersTreeDataProvider(createProviderRegistry(fakeSecrets(secrets) as never));
+  return new ProvidersTreeDataProvider(createProviderRegistry(fakeSecrets(secrets) as never, fakeMemento()));
 }
 
 describe('providers tree', () => {
@@ -12,7 +12,7 @@ describe('providers tree', () => {
     const rows = (await treeWith({ 'copilot-amplify.CA-groq.apiKey': 'k' }).getChildren()) as ProviderTreeItem[];
     const row = (id: string) => rows.find((r) => r.providerId === id);
 
-    expect(row('groq')).toMatchObject({ label: 'Groq', description: 'Ready · 7 models' });
+    expect(row('groq')).toMatchObject({ label: 'Groq', description: 'Ready · Models not loaded' });
     expect(row('glm')?.description).toBe('API key needed');
     expect(row('omniroute')?.description).toBe('Server URL needed');
     expect(row('agentrouter')?.description).toBe('API key needed');

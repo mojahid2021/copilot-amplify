@@ -37,6 +37,8 @@ export interface OmnirouteConfig {
   discoveryTimeoutMs: number;
   /** Log response cost/routing telemetry headers to the output channel. */
   logTelemetry: boolean;
+  /** Load models right after VS Code starts. */
+  warmupOnStartup: boolean;
 }
 
 const _cache = createCachedConfig(SECTION, (cfg: vscode.WorkspaceConfiguration): OmnirouteConfig => {
@@ -53,6 +55,7 @@ const _cache = createCachedConfig(SECTION, (cfg: vscode.WorkspaceConfiguration):
     requestTimeoutMs: positiveNumber(cfg.get<number>('requestTimeoutMs'), DEFAULT_REQUEST_TIMEOUT_MS),
     discoveryTimeoutMs: positiveNumber(cfg.get<number>('discoveryTimeoutMs'), DEFAULT_DISCOVERY_TIMEOUT_MS),
     logTelemetry: cfg.get<boolean>('logTelemetry', true),
+    warmupOnStartup: cfg.get<boolean>('warmupOnStartup', false),
   };
 });
 

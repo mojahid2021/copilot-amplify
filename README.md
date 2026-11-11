@@ -104,8 +104,8 @@ Install via `Extensions: Install from VSIX…`.
 3. **Pick a model**: open Copilot Chat's model picker and choose one, for example *GLM 5.2*.
 4. **Chat.** That's it.
 
-For OmniRoute, run **OmniRoute: Set Up…** instead of step 2; for OmniRoute and
-AgentRouter, select **Load Models** (the cloud icon on the row) before step 3.
+Before step 3, select **Load Models** (the cloud icon on the provider row) once;
+the list is kept between sessions. For OmniRoute, run **OmniRoute: Set Up…** instead of step 2.
 
 No `settings.json` edits required.
 
@@ -113,10 +113,10 @@ No `settings.json` edits required.
 
 | Provider | Catalog | Highlights |
 |---|---|---|
-| **Xiaomi MiMo** | Static (2 models) | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
-| **Z.ai GLM** | Static (10 models) | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
-| **Groq** | Static (7 models) | Ultra-fast Llama & GPT-OSS serving |
-| **NVIDIA NIM** | Static (9 models) | Broad open-model catalog with transparent ID mapping |
+| **Xiaomi MiMo** | 🔄 Loaded from Xiaomi | Auto-routes token-plan (`tp-`) keys to the dedicated gateway; up to 1M-token context |
+| **Z.ai GLM** | 🔄 Loaded from Z.ai | Reasoning-effort control on GLM-5.x; vision on `glm-5v-turbo` |
+| **Groq** | 🔄 Loaded from Groq | Ultra-fast Llama & GPT-OSS serving; context windows come straight from Groq |
+| **NVIDIA NIM** | 🔄 Loaded from NVIDIA | Every chat model NVIDIA serves (`GET /v1/models`) |
 | **OmniRoute** | 🔄 Dynamic | Loads models from your server (`GET /models`); works without a key when the server allows it |
 | **AgentRouter** | 🔄 Dynamic | Discovers models from `GET /api/pricing`; routes Claude models to the native Anthropic `messages` API and everything else to the OpenAI-compatible endpoint; single API key covers both transports |
 
@@ -138,15 +138,25 @@ Copilot Chat
        └─ throwMappedError()       HTTP status → readable message
 ```
 
-There are two kinds of provider:
+Every provider's model list comes from its server when you select **Load
+Models** (or **Refresh Providers and Models**), and is kept between VS Code
+sessions. VS Code asks for the model list often, so the extension never
+fetches on its own; it answers from the saved list.
 
-| Kind | Class | Providers | Models come from |
-|---|---|---|---|
-| Fixed catalog | `StaticChatProvider` | Xiaomi, Z.ai, Groq, NVIDIA | `src/core/models/catalog.ts` |
-| Dynamic catalog | `DynamicCatalogProvider` | OmniRoute, AgentRouter | the server, on **Load Models** / **Refresh** only |
+| Class | Providers | Model list |
+|---|---|---|
+| `OpenAiCompatibleProvider` | Xiaomi, Z.ai, Groq, NVIDIA | `GET {baseURL}/models` |
+| `OmnirouteChatProvider` | OmniRoute | `GET {serverUrl}/models` |
+| `AgentrouterChatProvider` | AgentRouter | `GET /api/pricing` |
 
-Dynamic providers never fetch on their own: VS Code asks for the model list
-often, so it only ever gets the cached list.
+All three extend `DynamicCatalogProvider`. The model lists of the first four
+carry ids (Groq adds context windows) but not whether a model supports tools
+or images, and they mix in speech, embedding and safety models. So:
+
+- non-chat models are filtered out by id;
+- models in `src/core/models/catalog.ts` keep their exact limits, vision, tools and reasoning settings;
+- other models get a 32K context (or what the server reports) with tools on;
+- when a provider has no list endpoint (Z.ai, and Xiaomi so far), its known models are used.
 
 <details>
 <summary><strong>Project layout</strong></summary>
@@ -158,7 +168,7 @@ src/
 ├── core/
 │   ├── provider/
 │   │   ├── baseChatProvider.ts        # the chat pipeline above
-│   │   ├── dynamicCatalogProvider.ts  # discovery, model cache, health for server catalogs
+│   │   ├── dynamicCatalogProvider.ts  # model list loading, cache, saving between sessions, health
 │   │   └── registry.ts                # ProviderRegistry + the provider/descriptor interfaces
 │   ├── api/                # OpenAI-SDK client, Anthropic client, SSE parser, fetch helpers
 │   ├── auth/               # BaseAuthManager (SecretStorage)
@@ -166,12 +176,12 @@ src/
 │   ├── resilience/         # circuit breaker, TTL cache, 503 classifier, network quality
 │   ├── retry/              # backoff + Retry-After
 │   ├── thinking/           # <think>…</think> extraction from streamed text
-│   ├── models/catalog.ts   # built-in model lists
+│   ├── models/             # known model details (catalog.ts), picker id helpers (modelIds.ts)
 │   ├── logging/            # output-channel logger with secret redaction
 │   └── diagnostics.ts, globalConfig.ts, url.ts, util/
 ├── providers/
 │   ├── index.ts            # registers every provider
-│   ├── static/             # StaticChatProvider
+│   ├── openaiCompatible/   # OpenAiCompatibleProvider (Xiaomi, Z.ai, Groq, NVIDIA)
 │   ├── xiaomi/ zai/ groq/ nvidia/      # one descriptor file each
 │   ├── omniroute/          # dynamic: config, API client, discovery, diagnostics
 │   └── agentrouter/        # dynamic: config, discovery, catalog, dual transport
@@ -207,7 +217,9 @@ first activation and then removed.
 |---|---|---|
 | `copilot-amplify.enableReasoning` | `true` | Global reasoning toggle for thinking-capable models |
 | `copilot-amplify.customSystemPrompt` | *(empty)* | Injected into every request across providers |
-| `copilot-amplify.requestTimeoutMs` | `120000` | Chat request timeout for fixed-catalog providers |
+| `copilot-amplify.requestTimeoutMs` | `120000` | Chat request timeout for Xiaomi, Z.ai, Groq and NVIDIA |
+| `copilot-amplify.loadModelsOnStartup` | `false` | Load the Xiaomi, Z.ai, Groq and NVIDIA model lists when VS Code starts |
+| `copilot-amplify.modelListTimeoutMs` | `8000` | Timeout for loading those model lists and for connection tests |
 | `copilot-amplify.debugLogging` | `false` | Debug-level logs in the output channel |
 | `copilot-amplify.circuitBreaker.enabled` | `true` | Fail-fast after repeated failures — **every** provider |
 | `copilot-amplify.circuitBreaker.failureThreshold` | `5` | Consecutive failures before a circuit opens |
@@ -257,7 +269,7 @@ right-click it for everything else.
 | `Manage Providers…` | One menu for keys, tests, OmniRoute setup and troubleshooting |
 | `Set API Key…` / `Remove API Key` | Save or delete a provider's key (stored in your system keychain) |
 | `Test Connection` | Check that a provider is reachable and accepts your key |
-| `Refresh Providers and Models` | Reload model lists from OmniRoute and AgentRouter |
+| `Refresh Providers and Models` | Reload model lists from Groq, NVIDIA, OmniRoute and AgentRouter |
 | `Show Diagnostics` | Status, key presence and recent errors for every provider (never shows keys) |
 | `Show Network Quality` | Response time and error rate per provider |
 | `OmniRoute: Set Up…` | Server URL, optional key, then a connection test |
@@ -322,11 +334,12 @@ Push a version tag — CI publishes to both registries and attaches the `.vsix` 
 Contributions are welcome. Before opening a PR, `npm run typecheck && npm run lint && npm test`
 must pass. Commits follow Conventional Commits (`feat:`, `fix:`, `refactor:`, `docs:` …).
 
-### Adding a fixed-catalog provider
+### Adding a provider
 
-Most providers need no new class, only a descriptor. Using Groq as the template:
+Any provider with an OpenAI-compatible API needs only a descriptor. Using Groq as the template:
 
-1. Add the model list to `src/core/models/catalog.ts`.
+1. Optionally add details for well-known models to `src/core/models/catalog.ts`
+   (limits, vision, tools). Models without details still work, with safe defaults.
 2. Create `src/providers/<name>/index.ts`:
 
    ```ts
@@ -334,17 +347,18 @@ Most providers need no new class, only a descriptor. Using Groq as the template:
      return {
        id: 'acme',                                   // also add to ProviderId in core/provider/registry.ts
        vendor: 'LuneCode.CA-acme',                   // must match package.json
-       displayName: 'CA-Acme',
+       displayName: 'Acme',
        treeIcon: 'rocket',                           // a codicon name
-       modelCountLabel: ACME_MODELS.length,
-       createAuth: (secrets) => new BaseAuthManager(secrets, 'copilot-amplify.CA-acme.apiKey', 'CA-Acme'),
-       createProvider: (auth) =>
-         new StaticChatProvider(auth, {
-           baseURL: 'https://api.acme.example/v1',   // any OpenAI-compatible endpoint
-           providerDisplayName: 'Acme',
-           models: ACME_MODELS,
-           errorMessages: { 401: 'Authentication failed. Please set a new key.' },
-           // optional: defaultTemperature, supportsThinking, mapModelId
+       createAuth: (secrets) => new BaseAuthManager(secrets, 'copilot-amplify.CA-acme.apiKey', 'Acme'),
+       createProvider: (auth, state) =>
+         new OpenAiCompatibleProvider(auth, state, {
+           id: 'acme',
+           displayName: 'Acme',
+           baseURL: 'https://api.acme.example/v1',   // serves /models and /chat/completions
+           knownModels: ACME_MODELS,                 // may be []
+           notChat: /embed|whisper|tts/i,            // list entries that are not chat models
+           newModelDefaults: { maxInputTokens: 32_768, maxOutputTokens: 8_192, toolCalling: true },
+           // optional: supportsThinking, defaultTemperature, errorMessages, baseUrlForKey
          }),
      };
    }
@@ -352,12 +366,11 @@ Most providers need no new class, only a descriptor. Using Groq as the template:
 
 3. Register it in `src/providers/index.ts` (`registry.register(createAcmeDescriptor())`).
 4. Add the vendor to `contributes.languageModelChatProviders` in `package.json`.
-5. Add a case to `tests/staticProviders.test.ts` that checks the request URL and body.
+5. Add a case to `tests/openAiCompatible.test.ts` that checks the model list and a chat request.
 
-Subclass `StaticChatProvider` only when the provider really differs (see
-`providers/xiaomi`, which picks the URL from the key). A provider whose model
-list comes from its server extends `DynamicCatalogProvider` and implements
-`fetchModels`, `canLoadModels` and `testConnection` (see `providers/agentrouter`).
+A provider with a different API extends `DynamicCatalogProvider` and implements
+`fetchModels`, `canLoadModels`, `modelSupportsReasoning` and `testConnection`
+(see `providers/agentrouter`).
 
 ### Ground rules
 

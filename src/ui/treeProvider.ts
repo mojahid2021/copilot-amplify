@@ -15,7 +15,8 @@ import type { NetworkQuality } from '../core/resilience/networkQuality';
 
 export interface ProviderTreeItem extends vscode.TreeItem {
   providerId: string;
-  contextValue: 'provider' | 'dynamic-provider' | 'omniroute-provider';
+  /** omniroute-provider adds server-URL actions to the menu. */
+  contextValue: 'dynamic-provider' | 'omniroute-provider';
 }
 
 export interface SectionTreeItem extends vscode.TreeItem {
@@ -121,7 +122,6 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     switch (element.contextValue) {
       case 'section':
         return element.sectionId === 'favorites' ? this.getFavoriteItems() : this.getProviderItems();
-      case 'provider':
       case 'dynamic-provider':
       case 'omniroute-provider':
         return this.getModelItems(element.providerId as ProviderId);
@@ -168,16 +168,14 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     return descriptors.map((descriptor) => {
       const provider = this.registry.provider(descriptor.id);
       const health = provider.health();
-      const isDynamic = descriptor.modelCountLabel === 'live';
       const status = statusOf(health, this.apiKeyCache.get(descriptor.id) ?? false, descriptor.id === 'omniroute');
-      const models = isDynamic ? (health.status === 'connected' ? health.detail : 'Models not loaded') : `${descriptor.modelCountLabel} models`;
 
       const item = new vscode.TreeItem(descriptor.displayName, vscode.TreeItemCollapsibleState.Collapsed) as ProviderTreeItem;
       item.providerId = descriptor.id;
-      item.contextValue = descriptor.id === 'omniroute' ? 'omniroute-provider' : isDynamic ? 'dynamic-provider' : 'provider';
-      item.description = status.ready && models ? `${status.text} · ${models}` : status.text;
+      item.contextValue = descriptor.id === 'omniroute' ? 'omniroute-provider' : 'dynamic-provider';
+      item.description = status.ready && health.detail ? `${status.text} · ${health.detail}` : status.text;
       item.iconPath = new vscode.ThemeIcon(descriptor.treeIcon, status.color ? new vscode.ThemeColor(status.color) : undefined);
-      item.tooltip = providerTooltip(descriptor, status, health, provider.getNetworkQuality());
+      item.tooltip = providerTooltip(descriptor.displayName, status, health, provider.getNetworkQuality());
       item.command = { command: 'copilot-amplify.provider.click', title: 'Open Provider', arguments: [item] };
       return item;
     });
@@ -236,8 +234,7 @@ export class ProvidersTreeDataProvider implements vscode.TreeDataProvider<AnyTre
     const [label, icon, command]: [string, string, vscode.Command | undefined] =
       needsUrl ? ['Set the server URL to get started', 'link', { command: 'copilot-amplify.CA-omniroute.editBaseUrl', title: '' }]
       : needsKey ? ['Add an API key to get started', 'key', { command: 'copilot-amplify.setApiKey', title: '', arguments: [target] }]
-      : descriptor.modelCountLabel === 'live' ? ['Load models from the server', 'cloud-download', { command: 'copilot-amplify.loadModels', title: '', arguments: [target] }]
-      : ['No models available', 'info', undefined];
+      : ['Load models from the server', 'cloud-download', { command: 'copilot-amplify.loadModels', title: '', arguments: [target] }];
 
     const item = new vscode.TreeItem(label, vscode.TreeItemCollapsibleState.None) as HintTreeItem;
     item.contextValue = 'hint';
@@ -275,14 +272,8 @@ function statusOf(health: ProviderHealth, hasKey: boolean, keyOptional: boolean)
   }
 }
 
-function providerTooltip(
-  descriptor: AmplifyProviderDescriptor,
-  status: Status,
-  health: ProviderHealth,
-  quality: NetworkQuality,
-): vscode.MarkdownString {
-  const lines = [`**${descriptor.displayName}**`, '', `Status: ${status.text}`];
-  lines.push(descriptor.modelCountLabel === 'live' ? 'Models: loaded from the server' : `Models: ${descriptor.modelCountLabel} built in`);
+function providerTooltip(name: string, status: Status, health: ProviderHealth, quality: NetworkQuality): vscode.MarkdownString {
+  const lines = [`**${name}**`, '', `Status: ${status.text}`, 'Models: loaded from the server with Load Models, and kept between sessions'];
   if (health.detail && !status.ready) {
     lines.push(`Details: ${health.detail}`);
   }

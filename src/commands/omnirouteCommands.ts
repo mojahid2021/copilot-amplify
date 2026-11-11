@@ -142,7 +142,7 @@ export function registerOmnirouteCommands(context: vscode.ExtensionContext, deps
 
     vscode.commands.registerCommand('copilot-amplify.CA-omniroute.refreshModels', async () => {
       provider().refreshCaches();
-      const models = (await provider().loadModels?.()) ?? [];
+      const models = await provider().loadModels();
       tree.refresh();
       if (models.length > 0) {
         void vscode.window.showInformationMessage(`Loaded ${models.length} OmniRoute models.`);

@@ -29,3 +29,19 @@ export function sseBody(events: object[]): ReadableStream<Uint8Array> {
   const text = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('');
   return new Response(text).body!;
 }
+
+/** In-memory globalState. */
+export function fakeMemento(initial: Record<string, unknown> = {}) {
+  const store = new Map(Object.entries(initial));
+  return {
+    get: <T>(key: string, fallback?: T) => (store.has(key) ? (store.get(key) as T) : fallback),
+    update: async (key: string, value: unknown) => {
+      if (value === undefined) {
+        store.delete(key);
+      } else {
+        store.set(key, value);
+      }
+    },
+    keys: () => [...store.keys()],
+  } as unknown as import('vscode').Memento;
+}

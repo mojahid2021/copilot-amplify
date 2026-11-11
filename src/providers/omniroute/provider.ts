@@ -1,6 +1,8 @@
 import type * as vscode from 'vscode';
 import type { BaseAuthManager } from '../../core/auth/authManager';
 import { DynamicCatalogProvider } from '../../core/provider/dynamicCatalogProvider';
+import { fromPickerId } from '../../core/models/modelIds';
+import type { ThinkingOption } from '../../core/api/client';
 import type { ConnectionTestResult, ProviderHealth } from '../../core/provider/registry';
 import { OmnirouteApiClient } from './api';
 import {
@@ -17,7 +19,6 @@ import {
 } from './modelRegistry';
 import {
   ANONYMOUS_KEY,
-  decodeOmnirouteModelId,
   fetchOmnirouteModels,
   isNoThinkingVariant,
   resolveOmnirouteUpstreamModelId,
@@ -39,10 +40,13 @@ export class OmnirouteChatProvider extends DynamicCatalogProvider {
   private thinkingModelIds = new Set<string>();
 
   constructor(authManager: BaseAuthManager) {
+    const config = getOmnirouteConfig();
+    // Not persisted: per-model details (e.g. which models reject `temperature`)
+    // are only known after a live load.
     super(authManager, {
-      cacheTtlMs: getOmnirouteConfig().modelCacheTtlMs,
+      cacheTtlMs: config.modelCacheTtlMs,
+      warmupOnStartup: config.warmupOnStartup,
       onDidChangeConfig: onDidChangeOmnirouteConfig,
-      settingsSection: 'copilot-amplify.CA-omniroute',
     });
   }
 
@@ -93,11 +97,11 @@ export class OmnirouteChatProvider extends DynamicCatalogProvider {
   }
 
   protected override displayModelId(modelId: string): string {
-    return decodeOmnirouteModelId(modelId);
+    return fromPickerId(modelId);
   }
 
   protected override modelSupportsReasoning(modelId: string): boolean {
-    return this.thinkingModelIds.has(decodeOmnirouteModelId(modelId));
+    return this.thinkingModelIds.has(fromPickerId(modelId));
   }
 
   /** OmniRoute allows anonymous access, so never prompt for a key. */
@@ -113,8 +117,13 @@ export class OmnirouteChatProvider extends DynamicCatalogProvider {
     return resolveOmnirouteUpstreamModelId(modelId);
   }
 
+  /** OmniRoute takes `reasoning_effort`, not the Z.ai-style `thinking` field. */
+  protected override getThinkingOption(): ThinkingOption | undefined {
+    return undefined;
+  }
+
   protected override supportsThinking(modelId: string): boolean {
-    const decoded = decodeOmnirouteModelId(modelId);
+    const decoded = fromPickerId(modelId);
     if (isNoThinkingVariant(decoded)) {
       return false;
     }

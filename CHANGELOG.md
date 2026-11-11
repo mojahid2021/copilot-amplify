@@ -7,8 +7,12 @@
 - **Network quality** in the status bar and the **Show Network Quality** command: time to first token and error rate for the provider you used last.
 - **Show Diagnostics** is now available from the Command Palette.
 - Removing an API key now asks for confirmation.
+- **Every provider now loads its model list from the server.** Select **Load Models** on a provider (or **Refresh Providers and Models**) to see every chat model it currently serves; the list is kept between VS Code sessions. Well-known models keep their exact limits, vision, tool and reasoning settings; others start with a 32K context (or what the server reports) and tool calling on. Z.ai, and Xiaomi so far, have no model-list endpoint, so their known models are used. New settings: `copilot-amplify.loadModelsOnStartup` and `copilot-amplify.modelListTimeoutMs`.
+- **Connection tests check your key** with a one-token chat request; the model list endpoints answer without one.
 
 ### Changed
+
+- **Model ids with `/` now show in the picker** as `__` (for example `moonshotai__kimi-k3`), because VS Code hides ids containing `/`. NVIDIA ids changed (`kimi-k3` is now `moonshotai/kimi-k3`), so re-pin NVIDIA favorites.
 
 - **Clearer sidebar.** Providers are listed directly (Favorites appear above them once you pin a model). Each row shows a plain status such as *Ready · 7 models*, *API key needed* or *Server URL needed*, with one inline action; everything else is on right-click. Empty providers show a clickable next step.
 - Diagnostics, Network Quality, Documentation and Report an Issue moved from the tree into the view's title bar.

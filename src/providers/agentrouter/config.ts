@@ -30,6 +30,8 @@ export interface AgentrouterConfig {
   requestTimeoutMs: number;
   /** Catalog discovery / connection-test timeout in ms. */
   discoveryTimeoutMs: number;
+  /** Load models right after VS Code starts. */
+  warmupOnStartup: boolean;
 }
 
 const _cache = createCachedConfig(SECTION, (cfg: vscode.WorkspaceConfiguration): AgentrouterConfig => {
@@ -38,6 +40,7 @@ const _cache = createCachedConfig(SECTION, (cfg: vscode.WorkspaceConfiguration):
     cacheTtlMs: Math.max(10, cfg.get<number>('cacheTtlSeconds', 300)) * 1000,
     requestTimeoutMs: positiveNumber(cfg.get<number>('requestTimeoutMs'), DEFAULT_REQUEST_TIMEOUT_MS),
     discoveryTimeoutMs: positiveNumber(cfg.get<number>('discoveryTimeoutMs'), DEFAULT_DISCOVERY_TIMEOUT_MS),
+    warmupOnStartup: cfg.get<boolean>('warmupOnStartup', false),
   };
 });
 

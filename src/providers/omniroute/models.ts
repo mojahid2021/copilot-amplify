@@ -6,6 +6,7 @@
  */
 import type * as vscode from 'vscode';
 import { joinEndpoint } from '../../core/url';
+import { fromPickerId, toPickerId } from '../../core/models/modelIds';
 import { apiErrorFromResponse, createRequestSignal } from '../../core/api/http';
 
 export interface OmnirouteModelCapabilities {
@@ -160,22 +161,9 @@ export function toDisplayName(raw: OmnirouteModelRaw, id: string): string {
   return isNoThinkingVariant(id) ? `${display} (reasoning off)` : display;
 }
 
-/**
- * VS Code's Language Model API interprets `/` as a vendor/family separator,
- * so slashed model ids are silently dropped from the Copilot Chat picker.
- * Slash encoding via `__` is reversible and collision-free for OmniRoute ids.
- */
-export function encodeOmnirouteModelId(id: string): string {
-  return id.replaceAll('/', '__');
-}
-
-export function decodeOmnirouteModelId(id: string): string {
-  return id.replaceAll('__', '/');
-}
-
 /** Encoded picker id → upstream id sent to the server. */
 export function resolveOmnirouteUpstreamModelId(encodedId: string): string {
-  return stripNoThinkingPrefix(decodeOmnirouteModelId(encodedId));
+  return stripNoThinkingPrefix(fromPickerId(encodedId));
 }
 
 export interface MappedOmnirouteModel {
@@ -201,7 +189,7 @@ export function mapOmnirouteModel(raw: OmnirouteModelRaw, originalId: string): M
     capabilities: raw.capabilities,
     supportsThinking: thinking,
     info: {
-      id: encodeOmnirouteModelId(originalId),
+      id: toPickerId(originalId),
       name: toDisplayName(raw, originalId),
       family: 'omniroute',
       version: originalId,

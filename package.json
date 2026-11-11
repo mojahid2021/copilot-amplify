@@ -67,6 +67,19 @@
             "default": false,
             "markdownDescription": "Write detailed logs to the **Copilot Amplify** output channel. Useful when reporting a problem; API keys are never logged.",
             "order": 4
+          },
+          "copilot-amplify.loadModelsOnStartup": {
+            "type": "boolean",
+            "default": false,
+            "order": 5,
+            "markdownDescription": "Load model lists for Xiaomi MiMo, Z.ai, Groq and NVIDIA NIM right after VS Code starts. Lists are also kept between sessions, so this is only needed to pick up new models automatically."
+          },
+          "copilot-amplify.modelListTimeoutMs": {
+            "type": "number",
+            "default": 8000,
+            "minimum": 1000,
+            "order": 6,
+            "markdownDescription": "How long to wait, in milliseconds, when loading a model list or testing the connection for Xiaomi MiMo, Z.ai, Groq and NVIDIA NIM."
           }
         }
       },
@@ -290,11 +303,6 @@
       ],
       "view/item/context": [
         {
-          "command": "copilot-amplify.testConnection",
-          "when": "view == copilot-amplify.providers && viewItem == 'provider'",
-          "group": "inline@1"
-        },
-        {
           "command": "copilot-amplify.loadModels",
           "when": "view == copilot-amplify.providers && (viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
           "group": "inline@1"
@@ -311,17 +319,17 @@
         },
         {
           "command": "copilot-amplify.setApiKey",
-          "when": "view == copilot-amplify.providers && (viewItem == 'provider' || viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
+          "when": "view == copilot-amplify.providers && (viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
           "group": "2_setup@2"
         },
         {
           "command": "copilot-amplify.clearApiKey",
-          "when": "view == copilot-amplify.providers && (viewItem == 'provider' || viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
+          "when": "view == copilot-amplify.providers && (viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
           "group": "2_setup@3"
         },
         {
           "command": "copilot-amplify.testConnection",
-          "when": "view == copilot-amplify.providers && (viewItem == 'provider' || viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
+          "when": "view == copilot-amplify.providers && (viewItem == 'dynamic-provider' || viewItem == 'omniroute-provider')",
           "group": "3_check@1"
         },
         {

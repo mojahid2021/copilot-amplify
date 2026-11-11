@@ -1,7 +1,7 @@
 import type { AmplifyProviderDescriptor, ProviderId } from '../../core/provider/registry';
 import { BaseAuthManager } from '../../core/auth/authManager';
 import { GLM_MODELS } from '../../core/models/catalog';
-import { StaticChatProvider } from '../static/chatProvider';
+import { OpenAiCompatibleProvider } from '../openaiCompatible/provider';
 
 const BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
 
@@ -11,14 +11,17 @@ export function createZaiDescriptor(): AmplifyProviderDescriptor & { id: Provide
     vendor: 'LuneCode.CA-glm',
     displayName: 'Z.ai GLM',
     treeIcon: 'hubot',
-    modelCountLabel: GLM_MODELS.length,
     createAuth: (secrets) =>
       new BaseAuthManager(secrets, 'copilot-amplify.CA-glm.apiKey', 'Z.ai GLM', 'glm-chat-provider.apiKey'),
-    createProvider: (auth) =>
-      new StaticChatProvider(auth, {
+    createProvider: (auth, state) =>
+      new OpenAiCompatibleProvider(auth, state, {
+        id: 'glm',
+        displayName: 'Z.ai GLM',
         baseURL: BASE_URL,
-        providerDisplayName: 'Z.ai GLM',
-        models: GLM_MODELS,
+        // Z.ai documents no model-list endpoint; without one the known models are used.
+        knownModels: GLM_MODELS,
+        notChat: /embed|rerank|tts|asr|cogview|cogvideo|image|video/i,
+        newModelDefaults: { maxInputTokens: 32_768, maxOutputTokens: 8_192, toolCalling: true },
         supportsThinking: true,
         defaultTemperature: 0.7,
         errorMessages: {

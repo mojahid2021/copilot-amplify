@@ -245,9 +245,14 @@ export const GLM_MODELS: ConfigurableLanguageModelChatInformation[] = [
   },
 ];
 
-export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
+/**
+ * Details for NVIDIA NIM models we know, keyed by NVIDIA's own id. The model
+ * list itself comes from NVIDIA's `GET /v1/models`; it carries only ids, so
+ * these entries supply limits, vision and tool support for the models below.
+ */
+export const NIM_KNOWN_MODELS: ConfigurableLanguageModelChatInformation[] = [
   {
-    id: 'gemma-4-31b-it',
+    id: 'google/gemma-4-31b-it',
     name: 'Gemma 4 31B IT',
     family: 'nvidia-nim',
     version: 'gemma-4-31b-it',
@@ -258,7 +263,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     capabilities: { imageInput: true, toolCalling: true },
   },
   {
-    id: 'deepseek-v4-pro-0813',
+    id: 'deepseek-ai/deepseek-v4-pro-0813',
     name: 'DeepSeek V4 Pro (08-13)',
     family: 'nvidia-nim',
     version: 'deepseek-v4-pro-0813',
@@ -269,7 +274,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
-    id: 'nemotron-3-ultra-550b-a55b',
+    id: 'nvidia/nemotron-3-ultra-550b-a55b',
     name: 'Nemotron 3 Ultra 550B',
     family: 'nvidia-nim',
     version: 'nemotron-3-ultra-550b-a55b',
@@ -280,7 +285,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
-    id: 'deepseek-v4-flash-0731',
+    id: 'deepseek-ai/deepseek-v4-flash-0731',
     name: 'DeepSeek V4 Flash (07-31)',
     family: 'nvidia-nim',
     version: 'deepseek-v4-flash-0731',
@@ -291,7 +296,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
-    id: 'kimi-k3',
+    id: 'moonshotai/kimi-k3',
     name: 'Kimi K3',
     family: 'nvidia-nim',
     version: 'kimi-k3',
@@ -303,7 +308,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     configurationSchema: NVIDIA_THINKING_CONFIGURATION,
   },
   {
-    id: 'minimax-m3',
+    id: 'minimaxai/minimax-m3',
     name: 'MiniMax M3',
     family: 'nvidia-nim',
     version: 'minimax-m3',
@@ -314,7 +319,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     capabilities: { imageInput: true, toolCalling: true },
   },
   {
-    id: 'laguna-xs-2.1',
+    id: 'poolside/laguna-xs-2.1',
     name: 'Laguna XS 2.1',
     family: 'nvidia-nim',
     version: 'laguna-xs-2.1',
@@ -325,7 +330,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
-    id: 'gpt-oss-120b',
+    id: 'openai/gpt-oss-120b',
     name: 'GPT-OSS 120B',
     family: 'nvidia-nim',
     version: 'gpt-oss-120b',
@@ -336,7 +341,7 @@ export const NIM_MODELS: ConfigurableLanguageModelChatInformation[] = [
     capabilities: { imageInput: false, toolCalling: true },
   },
   {
-    id: 'mistral-nemotron',
+    id: 'mistralai/mistral-nemotron',
     name: 'Mistral Nemotron',
     family: 'nvidia-nim',
     version: 'mistral-nemotron',

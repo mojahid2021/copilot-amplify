@@ -8,7 +8,6 @@ export function createOmnirouteDescriptor(): AmplifyProviderDescriptor & { id: P
     vendor: 'LuneCode.CA-omniroute',
     displayName: 'OmniRoute',
     treeIcon: 'circuit-board',
-    modelCountLabel: 'live',
     createAuth: (secrets) =>
       new BaseAuthManager(secrets, 'copilot-amplify.CA-omniroute.apiKey', 'OmniRoute'),
     createProvider: (auth) => new OmnirouteChatProvider(auth),

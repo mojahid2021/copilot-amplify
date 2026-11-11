@@ -8,6 +8,7 @@ import { getGlobalConfig } from '../../core/globalConfig';
 import { getModelOption, getNumberModelOption } from '../../core/provider/baseChatProvider';
 import { DynamicCatalogProvider } from '../../core/provider/dynamicCatalogProvider';
 import type { ConnectionTestResult } from '../../core/provider/registry';
+import type { ThinkingOption } from '../../core/api/client';
 import { buildAgentrouterCatalog, resolveAgentrouterTransport } from './catalog';
 import {
   getAgentrouterAnthropicBaseUrl,
@@ -16,7 +17,7 @@ import {
   onDidChangeAgentrouterConfig,
 } from './config';
 import { testAgentrouterConnection } from './connectionTest';
-import { AGENTROUTER_DISPLAY_NAME, AGENTROUTER_SETTINGS_SECTION } from './descriptor';
+import { AGENTROUTER_DISPLAY_NAME } from './descriptor';
 import { fetchAgentrouterPricingFromConfig, type AgentrouterEndpointType } from './discovery';
 
 /** Budget for Claude's extended thinking when reasoning is on. */
@@ -41,11 +42,13 @@ export class AgentrouterChatProvider extends DynamicCatalogProvider {
   private transportByModel = new Map<string, AgentrouterEndpointType>();
   private anthropicClient?: { apiKey: string; client: AnthropicApiClient };
 
-  constructor(authManager: BaseAuthManager) {
+  constructor(authManager: BaseAuthManager, state: vscode.Memento) {
+    const config = getAgentrouterConfig();
     super(authManager, {
-      cacheTtlMs: getAgentrouterConfig().cacheTtlMs,
+      cacheTtlMs: config.cacheTtlMs,
+      warmupOnStartup: config.warmupOnStartup,
       onDidChangeConfig: onDidChangeAgentrouterConfig,
-      settingsSection: AGENTROUTER_SETTINGS_SECTION,
+      persist: { state, key: 'models.agentrouter' },
     });
   }
 
@@ -82,11 +85,16 @@ export class AgentrouterChatProvider extends DynamicCatalogProvider {
   }
 
   protected override modelSupportsReasoning(modelId: string): boolean {
-    return this.transportByModel.get(modelId) === 'anthropic';
+    return this.transportOf(modelId) === 'anthropic';
+  }
+
+  /** Claude gets `thinking` through the Anthropic transport; the OpenAI side takes `reasoning_effort`. */
+  protected override getThinkingOption(): ThinkingOption | undefined {
+    return undefined;
   }
 
   protected override supportsThinking(modelId: string): boolean {
-    return this.transportByModel.get(modelId) === 'anthropic';
+    return this.transportOf(modelId) === 'anthropic';
   }
 
   /** AgentRouter needs a key; fail fast instead of prompting mid-request. */
@@ -106,11 +114,14 @@ export class AgentrouterChatProvider extends DynamicCatalogProvider {
     progress: vscode.Progress<vscode.LanguageModelResponsePart>,
     token: vscode.CancellationToken,
   ): Promise<void> {
-    // Before the first Load Models the map is empty; guess from the id.
-    const transport = this.transportByModel.get(model.id) ?? (model.id.toLowerCase().startsWith('claude-') ? 'anthropic' : 'openai');
-    return transport === 'anthropic'
+    return this.transportOf(model.id) === 'anthropic'
       ? this.streamAnthropicResponse(apiKey, model, messages, options, progress, token)
       : super.sendChatRequest(apiKey, model, messages, options, progress, token);
+  }
+
+  /** Before a live load (e.g. a list saved by the last session), guess from the id. */
+  private transportOf(modelId: string): AgentrouterEndpointType {
+    return this.transportByModel.get(modelId) ?? (modelId.toLowerCase().startsWith('claude-') ? 'anthropic' : 'openai');
   }
 
   private async streamAnthropicResponse(
